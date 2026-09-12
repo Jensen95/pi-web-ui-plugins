@@ -1,0 +1,7 @@
+{
+	"id": "db-client",
+	"name": "Database Client",
+	"version": "0.2.0",
+	"description": "Database client: browse schemas, run SQL and edit data across MySQL / PostgreSQL / SQLite / SQL Server / MongoDB / Redis.",
+	"permissions": ["net", "tools"]
+}
