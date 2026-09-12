@@ -1,0 +1,30 @@
+# Dependencies
+node_modules/
+
+# Build artifacts
+dist/
+
+# OS files
+.DS_Store
+
+# pi agent data
+.pi/
+.pi-web/
+
+# Per-plugin runtime dependencies (installed on demand by the host)
+plugins/*/node_modules/
+
+# Per-plugin runtime data (user data, never committed)
+plugins/*/storage/
+
+# ---------------------------------------------------------------------------
+# Generated plugin artifacts.
+#
+# TypeScript under plugins/<id>/src/ is the source of truth. The pi-web-ui host
+# hardcodes the filenames below (server/plugins.ts imports index.mjs, the
+# browser imports client/entry.mjs), so they are compiled outputs produced by
+# `npm run build` and must never be committed or hand-edited.
+# ---------------------------------------------------------------------------
+plugins/*/index.mjs
+plugins/*/client/entry.mjs
+plugins/*/client/vendor/
