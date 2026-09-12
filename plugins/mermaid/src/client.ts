@@ -195,12 +195,21 @@ function renderSvg(code: string): Promise<RenderedDiagram> {
 	return result;
 }
 
+function setMarkup(element: Element, markup: string): void {
+	if (typeof document.createRange !== "function" || typeof element.replaceChildren !== "function") {
+		element.textContent = markup;
+		return;
+	}
+	const range = document.createRange();
+	range.selectNodeContents(element);
+	element.replaceChildren(range.createContextualFragment(markup));
+}
+
 function applyRenderedSvg(el: HTMLElement, rendered: RenderedDiagram): void {
 	if (rendered.dark) el.dataset.mermaidDark = "true";
 	else delete el.dataset.mermaidDark;
-	// Safe: the markup is mermaid's own output, produced with securityLevel
-	// "strict", which sanitizes diagram labels before they reach the SVG.
-	el.innerHTML = rendered.svg;
+	// Mermaid is configured with securityLevel "strict" before producing this SVG.
+	setMarkup(el, rendered.svg);
 }
 
 async function renderMermaid(code: string): Promise<HTMLElement> {
