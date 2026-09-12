@@ -1,0 +1,7 @@
+{
+	"id": "vscode-editor",
+	"name": "Editor",
+	"version": "0.3.1",
+	"description": "A VS Code-style editor with multi-root local and Remote-SSH file trees, CodeMirror tabs, remote editing, terminals, and SFTP sync. ssh2 installs on first activation.",
+	"permissions": ["fs:workspace+ssh", "net:ssh", "terminal"]
+}

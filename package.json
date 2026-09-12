@@ -1,0 +1,66 @@
+{
+	"name": "pi-web-ui-plugins",
+	"version": "0.1.0",
+	"private": true,
+	"type": "module",
+	"description": "English-only TypeScript ports of the pi-web-ui interface plugins: run-trace, mermaid, db-client, mcp-manager, vscode-editor and webmail.",
+	"license": "MIT",
+	"author": {
+		"name": "Jensen95"
+	},
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/Jensen95/pi-web-ui-plugins.git"
+	},
+	"engines": {
+		"node": ">=22.19.0"
+	},
+	"scripts": {
+		"test": "vitest run",
+		"test:watch": "vitest",
+		"typecheck": "tsc -p tsconfig.json --noEmit",
+		"lint": "oxlint plugins/ scripts/ tests/",
+		"lint:fix": "oxlint --fix plugins/ scripts/ tests/",
+		"format": "prettier --write .",
+		"format:check": "prettier --check .",
+		"build": "node scripts/build-plugins.mjs",
+		"build:run-trace": "node scripts/build-plugins.mjs run-trace",
+		"build:mermaid": "node scripts/build-plugins.mjs mermaid",
+		"build:db-client": "node scripts/build-plugins.mjs db-client",
+		"build:mcp-manager": "node scripts/build-plugins.mjs mcp-manager",
+		"build:vscode-editor": "node scripts/build-plugins.mjs vscode-editor",
+		"build:webmail": "node scripts/build-plugins.mjs webmail",
+		"clean": "node scripts/clean.mjs",
+		"clean:force": "node scripts/clean.mjs --force",
+		"check:english": "node scripts/check-english.mjs"
+	},
+	"devDependencies": {
+		"@codemirror/autocomplete": "^6.18.6",
+		"@codemirror/commands": "^6.8.0",
+		"@codemirror/lang-css": "^6.3.1",
+		"@codemirror/lang-html": "^6.4.9",
+		"@codemirror/lang-javascript": "^6.2.3",
+		"@codemirror/lang-json": "^6.0.1",
+		"@codemirror/lang-markdown": "^6.3.2",
+		"@codemirror/lang-python": "^6.1.7",
+		"@codemirror/language": "^6.10.8",
+		"@codemirror/lint": "^6.8.5",
+		"@codemirror/search": "^6.5.10",
+		"@codemirror/state": "^6.5.2",
+		"@codemirror/theme-one-dark": "^6.1.2",
+		"@codemirror/view": "^6.36.5",
+		"@types/node": "^22.19.0",
+		"@types/ws": "^8.5.13",
+		"@xterm/addon-fit": "^0.11.0",
+		"@xterm/xterm": "^6.0.0",
+		"codemirror": "^6.0.1",
+		"esbuild": "^0.28.2",
+		"mermaid": "^11.17.2",
+		"oxlint": "^1.81.0",
+		"prettier": "^3.9.6",
+		"ssh2": "^1.11.0",
+		"typescript": "^7.0.2",
+		"vis-timeline": "^8.5.4",
+		"vitest": "^4.1.11"
+	}
+}

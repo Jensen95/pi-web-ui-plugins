@@ -1,0 +1,126 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+# Needed to create the GitHub Release and attach files to it.
+permissions:
+  contents: write
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # The compiled entries are gitignored, so they only exist if we build them
+      # here. An archive without them would install a plugin that cannot run.
+      - run: npm run build
+
+      # Never publish an artifact this repo's own hard rule forbids.
+      - run: npm run check:english
+
+      # A tag can be pushed from any commit, not just one CI already verified, and
+      # these archives are the only supported install path. The suite also holds the
+      # cross-cutting invariants (catalog matches the plugin dirs, every expected
+      # artifact exists, nothing compiled is tracked), so it gates the release.
+      - run: npm test
+
+      # Package each plugin into an install-ready archive: manifest.json, README.md,
+      # the compiled index.mjs and client/entry.mjs, and client/vendor/*. The
+      # TypeScript sources under src/ and any node_modules stay out.
+      #
+      # This archive is the SUPPORTED install path. Because index.mjs and
+      # client/entry.mjs are compiled and gitignored, pointing pi-web-ui at
+      # plugins/<id> in the repository would copy a directory with no runnable
+      # entry point at all.
+      - name: Package plugins
+        run: |
+          set -euo pipefail
+          mkdir -p dist/release
+          for dir in plugins/*/; do
+            id="$(basename "$dir")"
+            if [ ! -f "${dir}manifest.json" ]; then
+              echo "skipping ${id}: no manifest.json"
+              continue
+            fi
+
+            stage="dist/release/${id}"
+            rm -rf "$stage"
+            mkdir -p "$stage"
+            cp "${dir}manifest.json" "$stage/"
+            if [ -f "${dir}README.md" ]; then cp "${dir}README.md" "$stage/"; fi
+            if [ -f "${dir}index.mjs" ]; then cp "${dir}index.mjs" "$stage/"; fi
+            if [ -d "${dir}client" ]; then
+              mkdir -p "${stage}/client"
+              cp -r "${dir}client/." "${stage}/client/"
+            fi
+
+            archive="dist/release/${id}.tar.gz"
+            tar -czf "$archive" -C "$stage" .
+            echo "=== ${id}.tar.gz ==="
+            contents="$(tar -tzf "$archive")"
+            echo "$contents"
+
+            # Verify the archive is complete and self-contained before shipping it.
+            if ! echo "$contents" | grep -qx "./manifest.json"; then
+              echo "FAIL: ${id}.tar.gz has no manifest.json" >&2
+              exit 1
+            fi
+            has_server=0
+            has_client=0
+            if echo "$contents" | grep -qx "./index.mjs"; then has_server=1; fi
+            if echo "$contents" | grep -qx "./client/entry.mjs"; then has_client=1; fi
+            if [ "$has_server" -eq 0 ] && [ "$has_client" -eq 0 ]; then
+              echo "FAIL: ${id}.tar.gz has no compiled entry point (index.mjs or client/entry.mjs)" >&2
+              exit 1
+            fi
+            if echo "$contents" | grep -q "^\./src/"; then
+              echo "FAIL: ${id}.tar.gz must not contain src/" >&2
+              exit 1
+            fi
+            if echo "$contents" | grep -q "node_modules"; then
+              echo "FAIL: ${id}.tar.gz must not contain node_modules/" >&2
+              exit 1
+            fi
+            echo "ok: ${id}.tar.gz (server entry: ${has_server}, client entry: ${has_client})"
+          done
+
+          # A release with no plugin in it is a broken release.
+          count="$(find dist/release -maxdepth 1 -name '*.tar.gz' | wc -l | tr -d ' ')"
+          if [ "$count" -eq 0 ]; then
+            echo "FAIL: no plugin archives were produced" >&2
+            exit 1
+          fi
+          echo "packaged ${count} plugin archive(s)"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pi-web-ui-plugins
+          path: dist/release/*.tar.gz
+          if-no-files-found: error
+
+      # Attach to a GitHub Release for tag pushes. Idempotent, so re-running a
+      # failed job replaces the files instead of erroring out.
+      - name: Attach archives to a GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            gh release create "$tag" --title "$tag" --generate-notes
+          fi
+          gh release upload "$tag" dist/release/*.tar.gz --clobber
+          gh release view "$tag"

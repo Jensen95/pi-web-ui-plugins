@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # Build before check:english on purpose: the English-only gate also scans the
+      # compiled entries (plugins/*/index.mjs and plugins/*/client/entry.mjs), so
+      # those artifacts have to exist or half of the rule would go unenforced.
+      - run: npm run build
+
+      - run: npm run format:check
+
+      - run: npm run lint
+
+      - run: npm run typecheck
+
+      # Hard requirement: zero CJK characters anywhere in the repo or its artifacts.
+      - run: npm run check:english
+
+      - run: npm test

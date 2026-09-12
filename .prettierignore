@@ -1,0 +1,7 @@
+# Obsolete upstream JavaScript sources. Each one is deleted when its plugin is
+# ported to plugins/<id>/src/client.ts, so they are never worth reformatting.
+plugins/*/src/*.js
+
+# Generated plugin artifacts are already covered by .gitignore (prettier honours
+# it), and third-party vendor bundles must never be reformatted:
+plugins/*/client/vendor/

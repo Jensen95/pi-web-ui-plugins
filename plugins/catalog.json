@@ -1,0 +1,50 @@
+[
+	{
+		"id": "webmail",
+		"name": "webmail",
+		"icon": "📬",
+		"description": "Read and send mail from the browser over IMAP and SMTP, with new-mail notifications and an optional switch that lets the agent manage the mailbox itself.",
+		"source": "Jensen95/pi-web-ui-plugins/plugins/webmail",
+		"homepage": "https://github.com/Jensen95/pi-web-ui-plugins/tree/main/plugins/webmail"
+	},
+	{
+		"id": "db-client",
+		"name": "db-client",
+		"icon": "🗄️",
+		"description": "Browse schemas, run SQL and edit rows across MySQL, PostgreSQL, SQLite, SQL Server, MongoDB and Redis. Drivers install themselves on first activation.",
+		"source": "Jensen95/pi-web-ui-plugins/plugins/db-client",
+		"homepage": "https://github.com/Jensen95/pi-web-ui-plugins/tree/main/plugins/db-client"
+	},
+	{
+		"id": "vscode-editor",
+		"name": "vscode-editor",
+		"icon": "📝",
+		"description": "A VSCode-style workbench: multi-root file tree, tabbed CodeMirror editing, xterm.js terminals in a bottom panel, Remote-SSH browsing and SFTP sync.",
+		"source": "Jensen95/pi-web-ui-plugins/plugins/vscode-editor",
+		"homepage": "https://github.com/Jensen95/pi-web-ui-plugins/tree/main/plugins/vscode-editor"
+	},
+	{
+		"id": "mermaid",
+		"name": "mermaid",
+		"icon": "📊",
+		"description": "Renders mermaid fences in messages as SVG diagrams. A renderer plugin: the engine is only fetched when such a fence actually appears, so ordinary chat pays nothing.",
+		"source": "Jensen95/pi-web-ui-plugins/plugins/mermaid",
+		"homepage": "https://github.com/Jensen95/pi-web-ui-plugins/tree/main/plugins/mermaid"
+	},
+	{
+		"id": "run-trace",
+		"name": "run-trace",
+		"icon": "🧭",
+		"description": "Collects a run into one replayable timeline of task, reasoning, tool calls, file changes and result, with detail for every node.",
+		"source": "Jensen95/pi-web-ui-plugins/plugins/run-trace",
+		"homepage": "https://github.com/Jensen95/pi-web-ui-plugins/tree/main/plugins/run-trace"
+	},
+	{
+		"id": "mcp-manager",
+		"name": "mcp-manager",
+		"icon": "🔌",
+		"description": "Manage MCP servers from the web UI through pi-mcp-adapter: inspect the effective configuration with its provenance, enable or disable servers, and add or remove them.",
+		"source": "Jensen95/pi-web-ui-plugins/plugins/mcp-manager",
+		"homepage": "https://github.com/Jensen95/pi-web-ui-plugins/tree/main/plugins/mcp-manager"
+	}
+]

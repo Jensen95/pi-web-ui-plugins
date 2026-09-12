@@ -1,0 +1,8 @@
+{
+	"id": "mcp-manager",
+	"name": "MCP Servers",
+	"version": "0.1.0",
+	"icon": "🔌",
+	"description": "Manage the MCP servers pi-mcp-adapter reads: every config layer with provenance, enable/disable toggles, and project-local add/remove. Writes only .pi/mcp.json; run /reload in pi to apply.",
+	"permissions": ["fs"]
+}

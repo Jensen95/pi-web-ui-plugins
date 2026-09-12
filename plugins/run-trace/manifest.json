@@ -1,0 +1,7 @@
+{
+	"id": "run-trace",
+	"name": "Run Trace",
+	"version": "0.1.0",
+	"icon": "🧭",
+	"description": "A replayable run trajectory and timeline of agent work, from task intake through reasoning, tool calls, file changes, and results."
+}
