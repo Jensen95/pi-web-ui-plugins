@@ -90,7 +90,7 @@ function withTempDir<T>(run: (dir: string) => T): T {
 }
 
 describe("plugin skeleton", () => {
-	it("contains exactly the five expected plugin directories", () => {
+	it("contains exactly the six expected plugin directories", () => {
 		expect(pluginIds()).toEqual(EXPECTED_PLUGIN_IDS);
 	});
 

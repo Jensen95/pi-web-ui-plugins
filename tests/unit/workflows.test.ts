@@ -110,7 +110,7 @@ describe("workflow inventory", () => {
 
 	it("installs with npm ci against a committed lockfile on a Node that satisfies engines", () => {
 		const enginesNode = readPackageJson().engines?.node ?? "";
-		const major = Number(enginesNode.replace(/\D/g, "").slice(0, 2));
+		const major = Number(enginesNode.match(/\d+/)?.[0]);
 		expect(major, `engines.node "${enginesNode}" has no parseable major`).toBeGreaterThanOrEqual(22);
 		expect(readFileSync(repoPath("package-lock.json"), "utf8").length).toBeGreaterThan(1000);
 		for (const name of EXPECTED_WORKFLOWS) {
