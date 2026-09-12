@@ -86,7 +86,9 @@ function setMarkup(element: Element, markup: string): void {
 
 export default {
 	mount(container: HTMLElement, ctx: ViewContext): () => void {
-		setMarkup(container, `
+		setMarkup(
+			container,
+			`
 <div class="wmx">
 	<style>
 		.wmx { max-width: 1100px; margin: 0 auto; font-size: 13px; display: grid; gap: 10px; }
@@ -305,7 +307,8 @@ export default {
 			</div>
 		</div>
 	</div>
-</div>`);
+</div>`,
+		);
 
 		const root = container.querySelector<HTMLElement>(".wmx")!;
 		/** Every selector below belongs to the template this module just rendered,
@@ -361,14 +364,17 @@ export default {
 		function renderList(): void {
 			const ul = $<HTMLElement>(".maillist");
 			if (!st.mails.length) {
-				setMarkup(ul, `<li class="empty" style="list-style:none;border:0;cursor:default;display:block;text-align:center;opacity:.45;padding:24px 0">No matching messages</li>`);
+				setMarkup(
+					ul,
+					`<li class="empty" style="list-style:none;border:0;cursor:default;display:block;text-align:center;opacity:.45;padding:24px 0">No matching messages</li>`,
+				);
 				return;
 			}
 			setMarkup(
 				ul,
 				st.mails
 					.map(
-					(m) => `
+						(m) => `
 <li data-uid="${m.uid}" class="${m.seen ? "" : "unread"}${m.uid === st.activeUid ? " active" : ""}">
 	<span class="from">${m.seen ? "" : '<span class="dot"></span>'}${esc(m.fromName || m.from)}</span>
 	<span class="date">${esc(fmtDate(m.date))}</span>
@@ -381,7 +387,9 @@ export default {
 
 		function renderReader(mail: ReadMail): void {
 			const r = $<HTMLElement>(".reader");
-			setMarkup(r, `
+			setMarkup(
+				r,
+				`
 <div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap">
 	<b style="font-size:14px">${esc(mail.subject)}</b>
 	<span style="opacity:.55;font-size:11px">${esc(fmtDate(mail.date))}</span>
@@ -393,7 +401,8 @@ export default {
 	<button class="act-toggle-seen">${mail.seen ? "Mark as unread" : "Mark as read"}</button>
 	<button class="act-reply">Reply</button>
 	<button class="act-delete danger">Delete</button>
-</div>`);
+</div>`,
+			);
 			$<HTMLElement>(".act-toggle-seen").onclick = () =>
 				ctx.send({ action: "mark", uids: [mail.uid], seen: !mail.seen });
 			$<HTMLElement>(".act-delete").onclick = () => ctx.send({ action: "delete", uids: [mail.uid] });
