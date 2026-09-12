@@ -1,0 +1,6 @@
+{
+	"name": "Webmail",
+	"version": "0.2.0",
+	"description": "IMAP/SMTP email management with inbox browsing, search, reading, sending, new-mail notifications, and optional AI management.",
+	"permissions": ["net:imap/smtp", "tools"]
+}
