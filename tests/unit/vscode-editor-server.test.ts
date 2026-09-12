@@ -432,7 +432,7 @@ async function settle(rounds = 6): Promise<void> {
 	for (let i = 0; i < rounds; i += 1) await new Promise((resolve) => setImmediate(resolve));
 }
 
-let entry: { activate(host: MockHost): (() => void) | undefined };
+let entry: { activate(host: MockHost): (() => void | Promise<void>) | undefined };
 const tempDirs: string[] = [];
 
 function makeTempDir(prefix: string): string {
@@ -2237,9 +2237,13 @@ describe("SFTP sync transfer", () => {
 		const h = await startServer();
 		addSshHost("first.example.com", 22, { dirs: ["/srv"] });
 		addSshHost("second.example.com", 22, { dirs: ["/srv"] });
-		await h.call("sync_save", { config: { host: "first.example.com", username: "tester", password: "pw", remoteRoot: "/srv" } });
+		await h.call("sync_save", {
+			config: { host: "first.example.com", username: "tester", password: "pw", remoteRoot: "/srv" },
+		});
 		expect((await h.call("sync_test")).ok).toBe(true);
-		await h.call("sync_save", { config: { host: "second.example.com", username: "tester", password: "pw", remoteRoot: "/srv" } });
+		await h.call("sync_save", {
+			config: { host: "second.example.com", username: "tester", password: "pw", remoteRoot: "/srv" },
+		});
 		expect((await h.call("sync_test")).ok).toBe(true);
 		expect(ssh.state.attempts.map((a) => String((a as ConnectAttempt).host))).toEqual([
 			"first.example.com",
@@ -2251,7 +2255,9 @@ describe("SFTP sync transfer", () => {
 	it("reuses one connection while the config is unchanged", async () => {
 		const h = await startServer();
 		addSshHost("reuse.example.com", 22, { dirs: ["/srv"] });
-		await h.call("sync_save", { config: { host: "reuse.example.com", username: "tester", password: "pw", remoteRoot: "/srv" } });
+		await h.call("sync_save", {
+			config: { host: "reuse.example.com", username: "tester", password: "pw", remoteRoot: "/srv" },
+		});
 		expect((await h.call("sync_test")).ok).toBe(true);
 		expect((await h.call("sync_test")).ok).toBe(true);
 		expect(ssh.state.attempts).toHaveLength(1);
@@ -2531,7 +2537,9 @@ describe("workspace lifecycle", () => {
 	it("drops the cached sync connection and per-workspace config when the root moves", async () => {
 		const h = await startServer();
 		addSshHost("switch.example.com", 22, { dirs: ["/srv"] });
-		await h.call("sync_save", { config: { host: "switch.example.com", username: "tester", password: "pw", remoteRoot: "/srv" } });
+		await h.call("sync_save", {
+			config: { host: "switch.example.com", username: "tester", password: "pw", remoteRoot: "/srv" },
+		});
 		expect((await h.call("sync_test")).ok).toBe(true);
 		expect(ssh.state.attempts).toHaveLength(1);
 
@@ -2549,7 +2557,7 @@ describe("workspace lifecycle", () => {
 		await h.call("upload_begin", { dir: "", name: "leftover.txt", size: 10 });
 		expect(readdirSync(h.root).filter((n) => n.endsWith(".part"))).toHaveLength(1);
 
-		h.deactivate?.();
+		await h.deactivate?.();
 		await settle();
 		expect(await h.host.emit.message({ action: "state" }, CLIENT)).toBe(0);
 		expect(await h.host.emit.attach(OTHER_CLIENT)).toBe(0);

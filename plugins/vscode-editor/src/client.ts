@@ -72,7 +72,7 @@ import type {
 	ViewContext,
 } from "./client-types.ts";
 
-/** HTML-escape a value that is about to be interpolated into innerHTML. */
+/** HTML-escape a value that is about to be interpolated into a markup fragment. */
 export function esc(s: unknown): string {
 	const escapes: Record<string, string> = {
 		"&": "&amp;",
@@ -194,10 +194,10 @@ export function langName(path: string): string {
 	if (/\.tsx?$/.test(path)) return "TypeScript";
 	if (/\.(jsx?|mjs|cjs)$/.test(path)) return "JavaScript";
 	if (/\.json5?$/.test(path)) return "JSON";
-	if (/\.css$/.test(path)) return "CSS";
+	if (path.endsWith(".css")) return "CSS";
 	if (/\.(html?|vue|svelte)$/.test(path)) return "HTML";
 	if (/\.(md|markdown)$/.test(path)) return "Markdown";
-	if (/\.py$/.test(path)) return "Python";
+	if (path.endsWith(".py")) return "Python";
 	return "Plain Text";
 }
 
@@ -348,9 +348,25 @@ function requiredQuery<T extends Element>(parent: ParentNode, selector: string):
 	return element;
 }
 
+function setMarkup(element: Element, markup: string): void {
+	if (typeof document.createRange !== "function" || typeof element.replaceChildren !== "function") {
+		element.textContent = markup;
+		return;
+	}
+	const range = document.createRange();
+	range.selectNodeContents(element);
+	element.replaceChildren(range.createContextualFragment(markup));
+}
+
+function reportUiError(err: unknown): void {
+	console.debug("[plugin:vscode-editor] best-effort UI operation failed", err);
+}
+
 export default {
 	mount(container: HTMLElement, ctx: ViewContext): () => void {
-		container.innerHTML = `
+		setMarkup(
+			container,
+			`
 <div class="vsc">
 	<style>${xtermCss}</style>
 	<style>
@@ -628,7 +644,7 @@ export default {
 			<label>Remote root directory * (which server directory the project syncs to)</label><input name="s-root" placeholder="/var/www/app" />
 			<label>Excludes (vscode-sftp style globs, comma separated)</label><input name="s-exclude" placeholder="node_modules/**, dist, *.log" />
 			<label style="display:flex;align-items:center;gap:6px"><input type="checkbox" name="s-autosave" style="width:auto" /> Upload the current file automatically on save (vscode-sftp's uploadOnSave)</label>
-			<div class="hint">The configuration is stored in the workspace at <b>.vscode/sftp.json</b> (format compatible with vscode-sftp / Natizyskunk.sftp); edit that file directly and Ctrl+S applies it. Supports name / passphrase / privateKeyPath (~ expansion) / agent (\$SSH_AUTH_SOCK) / ignore glob / watcher.autoUpload.</div>
+			<div class="hint">The configuration is stored in the workspace at <b>.vscode/sftp.json</b> (format compatible with vscode-sftp / Natizyskunk.sftp); edit that file directly and Ctrl+S applies it. Supports name / passphrase / privateKeyPath (~ expansion) / agent ($SSH_AUTH_SOCK) / ignore glob / watcher.autoUpload.</div>
 			<div class="btns"><button class="cancel">Cancel</button><button class="test">Test connection</button><button class="primary save-cfg">Save</button></div>
 		</div>
 	</div>
@@ -647,7 +663,8 @@ export default {
 			<div class="btns"><button class="cancel">Cancel</button><button class="primary save-host">Save</button></div>
 		</div>
 	</div>
-</div>`;
+</div>`,
+		);
 
 		// The template above is fixed, so every selector in it always matches; the casts
 		// only restate what lib.dom cannot know from a selector string.
@@ -873,11 +890,11 @@ export default {
 				// Preserve the scroll position across the redraw - otherwise opening a file or a state
 				// broadcast throws the tree back to the top and the user has to scroll down again.
 				const st = treeEl.scrollTop;
-				treeEl.innerHTML = "";
+				treeEl.replaceChildren();
 				// The Files tab only covers the local workspace; remote directory trees belong to the SSH tab (renderRemoteTrees)
 				const lh = document.createElement("div");
 				lh.className = "vsc-sect";
-				lh.innerHTML = `<b>📁 Local Workspace</b>`;
+				setMarkup(lh, `<b>📁 Local Workspace</b>`);
 				treeEl.appendChild(lh);
 				await renderDir("local", "", treeEl, 0);
 				renderTreeHighlight();
@@ -889,7 +906,7 @@ export default {
 		/** SSH tab: host list (status dot / connect-disconnect / terminal / edit / delete). */
 		function renderHosts() {
 			const st = hostsEl.scrollTop;
-			hostsEl.innerHTML = "";
+			hostsEl.replaceChildren();
 			const depsBtn = root.querySelector('.vsc-pane[data-pane="ssh"] button[data-act="deps"]') as HTMLElement;
 			depsBtn.classList.toggle("vsc-hidden", Boolean(S.depsReady));
 			depsBtn.title = S.depsInstalling ? "Installing dependency..." : "Install the ssh2 dependency";
@@ -915,11 +932,11 @@ export default {
 			// Same queue as renderTree: stops interleaved appends from duplicating remote trees under concurrency
 			await enqueue(async () => {
 				const st = sshTreeEl.scrollTop;
-				sshTreeEl.innerHTML = "";
+				sshTreeEl.replaceChildren();
 				for (const [connId, c] of conns) {
 					const sec = document.createElement("div");
 					sec.className = "vsc-sect";
-					sec.innerHTML = `<b>🖥 ${esc(c.label)}</b><span class="cwd" title="${esc(c.cwd)}">${esc(c.cwd)}</span>`;
+					setMarkup(sec, `<b>🖥 ${esc(c.label)}</b><span class="cwd" title="${esc(c.cwd)}">${esc(c.cwd)}</span>`);
 					sshTreeEl.appendChild(sec);
 					const sub = document.createElement("div");
 					sshTreeEl.appendChild(sub);
@@ -943,15 +960,17 @@ export default {
 			row.dataset.host = h.id;
 			const busy = connecting.has(h.id) || connMeta(connId ?? "")?.status === "connecting";
 			const dotCls = busy ? "busy" : connId ? "on" : "";
-			row.innerHTML =
+			setMarkup(
+				row,
 				`<span class="dot ${dotCls}"></span>` +
-				`<span class="nm" title="${esc(h.username)}@${esc(h.host)}:${h.port}">${esc(h.name || h.host)}</span>` +
-				`<span class="ops">` +
-				(connId
-					? '<button data-hop="term" title="New terminal">🖥</button><button data-hop="dis" title="Disconnect">⏏</button>'
-					: '<button data-hop="conn" title="Connect">⇄</button>') +
-				'<button data-hop="edit" title="Edit">✎</button>' +
-				'<button data-hop="del" title="Delete">🗑</button></span>';
+					`<span class="nm" title="${esc(h.username)}@${esc(h.host)}:${h.port}">${esc(h.name || h.host)}</span>` +
+					`<span class="ops">` +
+					(connId
+						? '<button data-hop="term" title="New terminal">🖥</button><button data-hop="dis" title="Disconnect">⏏</button>'
+						: '<button data-hop="conn" title="Connect">⇄</button>') +
+					'<button data-hop="edit" title="Edit">✎</button>' +
+					'<button data-hop="del" title="Delete">🗑</button></span>',
+			);
 			row.addEventListener("click", async (ev) => {
 				const btn = (ev.target as Element).closest<HTMLElement>("button[data-hop]");
 				if (btn) {
@@ -990,7 +1009,7 @@ export default {
 				const up = document.createElement("div");
 				up.className = "vsc-row";
 				up.style.paddingLeft = "22px";
-				up.innerHTML = `<span class="caret"></span><span>⬆</span><span class="nm">..</span>`;
+				setMarkup(up, `<span class="caret"></span><span>⬆</span><span class="nm">..</span>`);
 				up.addEventListener("click", async () => {
 					c.cwd = parentOf(c.cwd);
 					// Only clear this connection's directory cache - not the other hosts' or the local one
@@ -1028,9 +1047,11 @@ export default {
 				row.dataset.depth = String(depth);
 				const ek = tkey(scope, p);
 				const isOpen = expanded.has(ek);
-				row.innerHTML =
+				setMarkup(
+					row,
 					`<span class="caret">${e.type === "dir" ? (isOpen ? "▾" : "▸") : ""}</span>` +
-					`<span>${iconFor(e.name, e.type)}</span><span class="nm">${esc(e.name)}</span>`;
+						`<span>${iconFor(e.name, e.type)}</span><span class="nm">${esc(e.name)}</span>`,
+				);
 				row.addEventListener("click", async () => {
 					selectNode(scope, p, e.type);
 					if (e.type !== "dir") {
@@ -1038,7 +1059,7 @@ export default {
 						return;
 					}
 					// Expand/collapse in place: only touch the child container below this row instead of
-					// redrawing the whole tree - clearing the tree's innerHTML plus a network round trip
+					// redrawing the whole tree - clearing the tree plus a network round trip
 					// would make every other directory blink out and back.
 					const caret = row.querySelector(".caret");
 					if (expanded.has(ek)) {
@@ -1080,15 +1101,17 @@ export default {
 				sub.dataset.loaded = "0";
 				row.insertAdjacentElement("afterend", sub);
 			}
-			sub.innerHTML =
+			setMarkup(
+				sub,
 				`<div class="vsc-row loading" style="padding-left:${8 + (depth + 1) * 14}px">` +
-				`<span class="caret"></span><span>⏳</span><span class="nm">Loading...</span></div>`;
+					`<span class="caret"></span><span>⏳</span><span class="nm">Loading...</span></div>`,
+			);
 			const entries = await ensureDir(scope, p);
 			if (!expanded.has(ek)) {
 				sub.remove();
 				return;
 			} // the user collapsed it again while we waited
-			sub.innerHTML = "";
+			sub.replaceChildren();
 			sub.dataset.loaded = "1";
 			await renderEntries(scope, entries, p, sub, depth + 1);
 			applySelHighlight(); // give the new rows their selected state
@@ -1176,15 +1199,17 @@ export default {
 
 		// ---- Tabs ----------------------------------------------------------------------------
 		function renderTabs() {
-			tabsEl.innerHTML = "";
+			tabsEl.replaceChildren();
 			for (const [k, t] of tabs.entries()) {
 				const el = document.createElement("div");
 				el.className = "vsc-tab" + (k === activeTk ? " active" : "");
-				el.innerHTML =
+				setMarkup(
+					el,
 					`<span>${t.scope !== "local" ? "🖥" : iconFor(t.name ?? "", "file")}</span>` +
-					`<span class="tn">${esc(t.name)}</span>` +
-					(t.dirty ? '<span class="dot">●</span>' : "") +
-					`<button class="x" title="Close">✕</button>`;
+						`<span class="tn">${esc(t.name)}</span>` +
+						(t.dirty ? '<span class="dot">●</span>' : "") +
+						`<button class="x" title="Close">✕</button>`,
+				);
 				el.addEventListener("click", (ev) => {
 					if ((ev.target as Element).closest(".x")) return;
 					void activateTab(k);
@@ -1361,14 +1386,16 @@ export default {
 		function renderQuick() {
 			const ms = quickMatches();
 			quickSel = Math.min(quickSel, Math.max(0, ms.length - 1));
-			quickList.innerHTML =
+			setMarkup(
+				quickList,
 				ms
 					.map(
 						(f, i) =>
 							`<li data-p="${esc(f)}" class="${i === quickSel ? "sel" : ""}">` +
-							`${iconFor(f.split("/").pop() ?? "", "file")} ${f.split("/").pop()}<small>${esc(f)}</small></li>`,
+							`${iconFor(f.split("/").pop() ?? "", "file")} ${esc(f.split("/").pop() ?? "")}<small>${esc(f)}</small></li>`,
 					)
-					.join("") || `<li style="opacity:.5;cursor:default">No matching files</li>`;
+					.join("") || `<li style="opacity:.5;cursor:default">No matching files</li>`,
+			);
 		}
 
 		function openQuickOpen() {
@@ -1418,7 +1445,7 @@ export default {
 		// ---- Context menu (scope aware) -------------------------------------------------------
 
 		function showMenu(x: number, y: number, scope: string, pathW: string, type: string) {
-			menuEl.innerHTML = "";
+			menuEl.replaceChildren();
 			const items: MenuItem[] = [];
 			if (type === "dir") {
 				items.push(
@@ -1785,7 +1812,7 @@ export default {
 				if (containerScope === "local" && t.dir === "") {
 					items.push(["Refresh", () => void refreshAll()]);
 				}
-				menuEl.innerHTML = "";
+				menuEl.replaceChildren();
 				for (const [label, fn] of items) {
 					const b = document.createElement("button");
 					b.textContent = label;
@@ -1954,12 +1981,16 @@ export default {
 		function onThemeChange() {
 			try {
 				view.dispatch({ effects: themeComp.reconfigure(isLightTheme() ? cmLight : oneDark) });
-			} catch {}
+			} catch (err) {
+				console.debug("[plugin:vscode-editor] best-effort UI operation failed", err);
+			}
 			const th = buildTermTheme();
 			for (const [, t] of terms.entries()) {
 				try {
 					if (t.term) t.term.options.theme = th;
-				} catch {}
+				} catch (err) {
+					console.debug("[plugin:vscode-editor] best-effort UI operation failed", err);
+				}
 			}
 		}
 		window.addEventListener(THEME_CHANGE_EVENT, onThemeChange);
@@ -2001,7 +2032,9 @@ export default {
 			term.open(t.el);
 			try {
 				fit.fit();
-			} catch {}
+			} catch (err) {
+				console.debug("[plugin:vscode-editor] best-effort UI operation failed", err);
+			}
 			term.onData((d) => {
 				if (t.dead) return;
 				if (t.shellId) ctx.send({ action: "shell_input", connId: t.connId, shellId: t.shellId, b64: b64.enc(d) });
@@ -2052,7 +2085,9 @@ export default {
 					requestAnimationFrame(() => {
 						try {
 							t.fit?.fit();
-						} catch {}
+						} catch (err) {
+							console.debug("[plugin:vscode-editor] best-effort UI operation failed", err);
+						}
 						t.term?.focus();
 					});
 			}
@@ -2060,11 +2095,14 @@ export default {
 		}
 
 		function renderTermTabs() {
-			termTabsEl.innerHTML = "";
+			termTabsEl.replaceChildren();
 			for (const [tid, t] of terms.entries()) {
 				const el = document.createElement("span");
 				el.className = "vsc-ttab" + (tid === activeTermId ? " active" : "");
-				el.innerHTML = `<span class="tn">🖥 ${esc(t.label)}${t.n > 1 ? ` ${t.n}` : ""}</span><button class="x" title="Close">✕</button>`;
+				setMarkup(
+					el,
+					`<span class="tn">🖥 ${esc(t.label)}${t.n > 1 ? ` ${t.n}` : ""}</span><button class="x" title="Close">✕</button>`,
+				);
 				el.addEventListener("click", (ev: MouseEvent) => {
 					if (closestFromEventTarget(ev.target, ".x")) {
 						killTerm(t);
@@ -2092,13 +2130,19 @@ export default {
 			t.dead = true;
 			try {
 				t.ro?.disconnect();
-			} catch {}
+			} catch (err) {
+				reportUiError(err);
+			}
 			try {
 				t.term?.dispose();
-			} catch {}
+			} catch (err) {
+				reportUiError(err);
+			}
 			try {
 				t.el?.remove();
-			} catch {}
+			} catch (err) {
+				reportUiError(err);
+			}
 			terms.delete(t.id);
 		}
 
@@ -2117,7 +2161,9 @@ export default {
 				for (const [, t] of terms.entries()) {
 					try {
 						t.fit?.fit();
-					} catch {}
+					} catch (err) {
+						reportUiError(err);
+					}
 				}
 			};
 			const onUp = () => {
@@ -2130,7 +2176,7 @@ export default {
 
 		// ---- SFTP sync (local workspace <-> remote directory, per-direction overwrite) --------
 		function showSyncMenu(x: number, y: number) {
-			menuEl.innerHTML = "";
+			menuEl.replaceChildren();
 			const at = activeTk ? tabs.get(activeTk) : undefined;
 			const items: MenuItem[] = [
 				["Sync configuration...", () => void openSyncModal()],
@@ -2380,10 +2426,14 @@ export default {
 			for (const [, t] of terms.entries()) {
 				try {
 					t.ro?.disconnect();
-				} catch {}
+				} catch (err) {
+					reportUiError(err);
+				}
 				try {
 					t.term?.dispose();
-				} catch {}
+				} catch (err) {
+					reportUiError(err);
+				}
 			}
 			terms.clear();
 			offData();

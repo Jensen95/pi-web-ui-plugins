@@ -215,7 +215,7 @@ export default {
 		const LEGACY_SYNC_STORE = path.join(host.dir, "sync-configs.json"); // details
 		const syncConns = new Map(); // workspaceRoot → {client,sftp}
 		let syncConnFp = ""; // details
-		const syncDeps = { mod: null, ok: false, failed: false, installing: false, waiters: [] }; 
+		const syncDeps = { mod: null, ok: false, failed: false, installing: false, waiters: [] };
 
 		function posixJoin(base, rel) {
 			if (!rel) return base;
@@ -358,48 +358,52 @@ export default {
 			if (syncDeps.ok) return Promise.resolve(syncDeps.mod);
 			if (syncDeps.failed && !force) return Promise.resolve(null);
 			if (syncDeps.installing) return new Promise((res) => syncDeps.waiters.push(res));
-			return new Promise(async (res) => {
+			return new Promise((res) => {
 				syncDeps.installing = true;
-				try {
-					const m = await import("ssh2");
-					syncDeps.mod = m.default ?? m;
-					syncDeps.ok = true;
-				} catch {
-					host.notify("info", "📝 Editor sync: installing dependency (ssh2)...");
-					let cli = null;
+				void (async () => {
 					try {
-						cli = createRequire(import.meta.url).resolve("npm/bin/npm-cli.js");
-					} catch {}
-					const args = ["--prefix", host.dir, "install", "ssh2@latest", "--no-audit", "--no-fund"];
-					const child = cli
-						? spawn(process.execPath, [cli, ...args], { stdio: "ignore" })
-						: spawn("npm", args, { stdio: "ignore", shell: process.platform === "win32" });
-					child.on("error", () => finish(false));
-					child.on("exit", (code) => finish(code === 0));
-					return;
-					async function finish(ok) {
-						syncDeps.installing = false;
-						syncDeps.failed = !ok;
-						if (ok) {
-							try {
-								const m = await import("ssh2");
-								syncDeps.mod = m.default ?? m;
-								syncDeps.ok = true;
-							} catch {}
+						const m = await import("ssh2");
+						syncDeps.mod = m.default ?? m;
+						syncDeps.ok = true;
+						syncDeps.failed = false;
+					} catch {
+						host.notify("info", "📝 Editor sync: installing dependency (ssh2)...");
+						let cli = null;
+						try {
+							cli = createRequire(import.meta.url).resolve("npm/bin/npm-cli.js");
+						} catch {}
+						const args = ["--prefix", host.dir, "install", "ssh2@latest", "--no-audit", "--no-fund"];
+						const child = cli
+							? spawn(process.execPath, [cli, ...args], { stdio: "ignore" })
+							: spawn(process.platform === "win32" ? "npm.cmd" : "npm", args, { stdio: "ignore" });
+						child.on("error", () => finish(false));
+						child.on("exit", (code) => finish(code === 0));
+						return;
+						async function finish(ok) {
+							syncDeps.installing = false;
+							syncDeps.failed = !ok;
+							if (ok) {
+								try {
+									const m = await import("ssh2");
+									syncDeps.mod = m.default ?? m;
+									syncDeps.ok = true;
+								} catch {}
+							}
+							host.notify(
+								syncDeps.ok ? "success" : "error",
+								syncDeps.ok
+									? "📝 Editor sync dependency installation completed"
+									: "📝 Editor sync dependency installation failed; run npm install ssh2 in the plugin directory",
+							);
+							for (const w of syncDeps.waiters.splice(0)) w(syncDeps.ok ? syncDeps.mod : null);
+							broadcastSshState(); // details → details ⚠ssh2 details
+							res(syncDeps.ok ? syncDeps.mod : null);
 						}
-						host.notify(
-							syncDeps.ok ? "success" : "error",
-							syncDeps.ok
-								? "📝 Editor sync dependency installation completed"
-								: "📝 Editor sync dependency installation failed; run npm install ssh2 in the plugin directory",
-						);
-						for (const w of syncDeps.waiters.splice(0)) w(syncDeps.ok ? syncDeps.mod : null);
-						broadcastSshState(); // details → details ⚠ssh2 details
-						res(syncDeps.ok ? syncDeps.mod : null);
 					}
-				}
-				syncDeps.installing = false;
-				res(syncDeps.ok ? syncDeps.mod : null);
+					syncDeps.installing = false;
+					for (const w of syncDeps.waiters.splice(0)) w(syncDeps.ok ? syncDeps.mod : null);
+					res(syncDeps.ok ? syncDeps.mod : null);
+				})();
 			});
 		}
 
@@ -435,7 +439,9 @@ export default {
 				if (!cfg.privateKey && !cfg.privateKeyPath)
 					throw new Error("provide a password, private key, or agent in .vscode/sftp.json");
 				try {
-					privateKey = cfg.privateKeyPath ? await fs.readFile(resolveKeyFile(cfg.privateKeyPath), "utf8") : cfg.privateKey;
+					privateKey = cfg.privateKeyPath
+						? await fs.readFile(resolveKeyFile(cfg.privateKeyPath), "utf8")
+						: cfg.privateKey;
 				} catch {
 					throw new Error(`failed to read private key file: ${cfg.privateKeyPath}`);
 				}
