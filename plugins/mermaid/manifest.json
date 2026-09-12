@@ -1,0 +1,8 @@
+{
+	"id": "mermaid",
+	"name": "Mermaid Diagrams",
+	"version": "1.0.0",
+	"description": "Renders mermaid fences in messages to SVG diagrams (fenced-code renderer plugin, offline-first local engine)",
+	"view": false,
+	"renderers": ["mermaid"]
+}
