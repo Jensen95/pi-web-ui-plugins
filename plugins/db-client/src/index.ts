@@ -375,7 +375,7 @@ export function cellVal(value: unknown): CellValue {
 	if (typeof value === "object") {
 		let s: string;
 		try {
-			s = JSON.stringify(value, (key: string, item: unknown) => {
+			s = JSON.stringify(value, (_key: string, item: unknown) => {
 				// A BSON wrapper (ObjectId, Decimal128, ...) would serialize as an empty
 				// object; its own toString() is the useful form.
 				const candidate = item as { _bsontype?: unknown; toString?: () => string } | null;
@@ -481,6 +481,10 @@ interface MysqlFactory {
 
 type MysqlPromiseModule = MysqlFactory & { default?: MysqlFactory };
 
+function queryMysql(conn: MysqlConnection, sql: string, params?: unknown[]): Promise<[MysqlRows, unknown]> {
+	return params === undefined ? conn.query(sql) : conn.query(sql, params);
+}
+
 async function mysqlAdapter(cfg: StoredConn): Promise<DbAdapter> {
 	const mod = await loadDriver<MysqlPromiseModule>("mysql2/promise");
 	const mysql = mod.default ?? mod;
@@ -512,7 +516,8 @@ async function mysqlAdapter(cfg: StoredConn): Promise<DbAdapter> {
 			return rows.map((r) => Object.values(r)[0]).filter((name): name is string => Boolean(name));
 		},
 		async listTables(db) {
-			const [rows] = await conn.query(
+			const [rows] = await queryMysql(
+				conn,
 				`SELECT table_name AS name, table_type AS kind, IFNULL(table_rows,0) AS approx_rows
 				 FROM information_schema.tables WHERE table_schema=? ORDER BY table_name`,
 				[db],
@@ -524,13 +529,15 @@ async function mysqlAdapter(cfg: StoredConn): Promise<DbAdapter> {
 			}));
 		},
 		async describeTable(db, t) {
-			const [cols] = await conn.query(
+			const [cols] = await queryMysql(
+				conn,
 				`SELECT column_name AS name, column_type AS type, is_nullable AS nullable,
 				        column_default AS def, column_key AS ckey, extra, column_comment AS comment
 				 FROM information_schema.columns WHERE table_schema=? AND table_name=? ORDER BY ordinal_position`,
 				[db, t],
 			);
-			const [idx] = await conn.query(
+			const [idx] = await queryMysql(
+				conn,
 				`SELECT index_name AS name, NON_UNIQUE AS non_unique,
 				        GROUP_CONCAT(column_name ORDER BY seq_in_index) AS cols
 				 FROM information_schema.statistics WHERE table_schema=? AND table_name=?
@@ -540,7 +547,7 @@ async function mysqlAdapter(cfg: StoredConn): Promise<DbAdapter> {
 			let ddl = "";
 			try {
 				const showSql = `SHOW CREATE TABLE ${qMysql(db)}.${qMysql(t)}`;
-				const [[row]] = await conn.query(showSql);
+				const [[row]] = await queryMysql(conn, showSql);
 				ddl = String(row["Create Table"] ?? row["Create View"] ?? "");
 			} catch {
 				/* a view and a few other cases have no CREATE statement; ignore */
@@ -570,7 +577,7 @@ async function mysqlAdapter(cfg: StoredConn): Promise<DbAdapter> {
 			const total = Number(totalRes[0][0]?.n ?? 0);
 			const orderSql = opt.orderBy ? ` ORDER BY ?? ${opt.dir === "desc" ? "DESC" : "ASC"}` : "";
 			const pageParams = opt.orderBy ? [db, t, opt.orderBy] : [db, t];
-			const [rows] = await conn.query(`SELECT * FROM ??.??${orderSql} LIMIT ? OFFSET ?`, [
+			const [rows] = await queryMysql(conn, `SELECT * FROM ??.??${orderSql} LIMIT ? OFFSET ?`, [
 				...pageParams,
 				Math.min(Number(opt.limit) || 50, MAX_PAGE_ROWS),
 				Math.max(Number(opt.offset) || 0, 0),
@@ -579,12 +586,14 @@ async function mysqlAdapter(cfg: StoredConn): Promise<DbAdapter> {
 				? Object.keys(rows[0])
 				: ((await conn.query("SELECT * FROM ??.?? LIMIT 1", [db, t]))[0]?.fields?.map((f) => f.name) ??
 					(
-						await conn.query(
+						await queryMysql(
+							conn,
 							`SELECT column_name FROM information_schema.columns WHERE table_schema=? AND table_name=? ORDER BY ordinal_position`,
 							[db, t],
 						)
 					)[0].map((r) => String(r.column_name)));
-			const [pkRows] = await conn.query(
+			const [pkRows] = await queryMysql(
+				conn,
 				`SELECT column_name FROM information_schema.columns WHERE table_schema=? AND table_name=? AND column_key='PRI' ORDER BY ordinal_position LIMIT 1`,
 				[db, t],
 			);
@@ -599,7 +608,7 @@ async function mysqlAdapter(cfg: StoredConn): Promise<DbAdapter> {
 		async query(db, sql) {
 			await useDb(db);
 			const started = Date.now();
-			const [result] = await conn.query(sql);
+			const [result] = await queryMysql(conn, sql);
 			if (Array.isArray(result)) {
 				// A SELECT result set.
 				const fields = result.length ? Object.keys(result[0]) : [];
@@ -611,6 +620,8 @@ async function mysqlAdapter(cfg: StoredConn): Promise<DbAdapter> {
 				};
 			}
 			// A statement with no result set: mysql2 puts an OkPacket there instead.
+			// SAFETY: mysql2 returns an OkPacket for non-SELECT statements; the adapter
+			// only reads its optional affectedRows field.
 			const ok = result as unknown as { affectedRows?: number };
 			return {
 				total: 0,
@@ -624,13 +635,14 @@ async function mysqlAdapter(cfg: StoredConn): Promise<DbAdapter> {
 			const cols = Object.keys(changes);
 			if (!cols.length) throw new Error("No columns to update");
 			const updateSql = `UPDATE ${qMysql(db)}.${qMysql(t)} SET ${cols.map((c) => `${qMysql(c)}=?`).join(", ")} WHERE ${qMysql(pkCol)}=?`;
-			const [r] = await conn.query(updateSql, [...Object.values(changes), pkVal]);
+			const [r] = await queryMysql(conn, updateSql, [...Object.values(changes), pkVal]);
 			return { affected: Number(r?.affectedRows ?? 0) };
 		},
 		async insertRow(db, t, values) {
 			const cols = Object.keys(values);
 			if (!cols.length) throw new Error("No columns to insert (all left blank)");
-			const [r] = await conn.query(
+			const [r] = await queryMysql(
+				conn,
 				`INSERT INTO ${qMysql(db)}.${qMysql(t)} (${cols.map(qMysql).join(", ")}) VALUES (${cols.map(() => "?").join(", ")})`,
 				Object.values(values),
 			);
@@ -638,7 +650,7 @@ async function mysqlAdapter(cfg: StoredConn): Promise<DbAdapter> {
 		},
 		async deleteRow(db, t, pkCol, pkVal) {
 			const deleteSql = `DELETE FROM ${qMysql(db)}.${qMysql(t)} WHERE ${qMysql(pkCol)}=?`;
-			const [r] = await conn.query(deleteSql, [pkVal]);
+			const [r] = await queryMysql(conn, deleteSql, [pkVal]);
 			return { affected: Number(r?.affectedRows ?? 0) };
 		},
 		async close() {
@@ -668,6 +680,10 @@ interface PgClient {
 }
 
 type PgClientCtor = new (config: Record<string, unknown>) => PgClient;
+
+function queryPg(client: PgClient, sql: string, params?: unknown[]): Promise<PgResult> {
+	return params === undefined ? client.query(sql) : client.query(sql, params);
+}
 
 interface PgModule {
 	Client: PgClientCtor;
@@ -759,12 +775,12 @@ async function postgresAdapter(cfg: StoredConn): Promise<DbAdapter> {
 		},
 		async selectPage(db, t, opt) {
 			const c = await getCli(db);
-			const cnt = await c.query(`SELECT COUNT(*)::bigint AS n FROM ${qPg("public")}.${qPg(t)}`);
+			const cnt = await queryPg(c, `SELECT COUNT(*)::bigint AS n FROM ${qPg("public")}.${qPg(t)}`);
 			const total = Number(cnt.rows[0]?.n ?? 0);
 			const orderSql = opt.orderBy
 				? ` ORDER BY ${qPg(opt.orderBy)} ${opt.dir === "desc" ? "DESC" : "ASC"} NULLS LAST`
 				: " ORDER BY 1";
-			const r = await c.query(`SELECT * FROM ${qPg("public")}.${qPg(t)}${orderSql} LIMIT $1 OFFSET $2`, [
+			const r = await queryPg(c, `SELECT * FROM ${qPg("public")}.${qPg(t)}${orderSql} LIMIT $1 OFFSET $2`, [
 				Math.min(Number(opt.limit) || 50, MAX_PAGE_ROWS),
 				Math.max(Number(opt.offset) || 0, 0),
 			]);
@@ -787,7 +803,7 @@ async function postgresAdapter(cfg: StoredConn): Promise<DbAdapter> {
 		async query(db, sql) {
 			const c = await getCli(db || curName);
 			const started = Date.now();
-			const r = await c.query(sql);
+			const r = await queryPg(c, sql);
 			const columns = r.fields?.map((f) => f.name) ?? [];
 			return {
 				total: r.rows?.length ?? 0,
@@ -801,10 +817,11 @@ async function postgresAdapter(cfg: StoredConn): Promise<DbAdapter> {
 			if (!cols.length) throw new Error("No columns to update");
 			const c = await getCli(db);
 			const sets = cols.map((col, i) => `${qPg(col)}=$${i + 1}`).join(", ");
-			const r = await c.query(`UPDATE ${qPg("public")}.${qPg(t)} SET ${sets} WHERE ${qPg(pkCol)}=$${cols.length + 1}`, [
-				...Object.values(changes),
-				pkVal,
-			]);
+			const r = await queryPg(
+				c,
+				`UPDATE ${qPg("public")}.${qPg(t)} SET ${sets} WHERE ${qPg(pkCol)}=$${cols.length + 1}`,
+				[...Object.values(changes), pkVal],
+			);
 			return { affected: r.rowCount ?? 0 };
 		},
 		async insertRow(db, t, values) {
@@ -812,7 +829,8 @@ async function postgresAdapter(cfg: StoredConn): Promise<DbAdapter> {
 			if (!cols.length) throw new Error("No columns to insert (all left blank)");
 			const c = await getCli(db);
 			const ph = cols.map((_, i) => `$${i + 1}`).join(", ");
-			const r = await c.query(
+			const r = await queryPg(
+				c,
 				`INSERT INTO ${qPg("public")}.${qPg(t)} (${cols.map(qPg).join(", ")}) VALUES (${ph}) RETURNING 1 AS ok`,
 				Object.values(values),
 			);
@@ -820,7 +838,7 @@ async function postgresAdapter(cfg: StoredConn): Promise<DbAdapter> {
 		},
 		async deleteRow(db, t, pkCol, pkVal) {
 			const c = await getCli(db);
-			const r = await c.query(`DELETE FROM ${qPg("public")}.${qPg(t)} WHERE ${qPg(pkCol)}=$1`, [pkVal]);
+			const r = await queryPg(c, `DELETE FROM ${qPg("public")}.${qPg(t)} WHERE ${qPg(pkCol)}=$1`, [pkVal]);
 			return { affected: r.rowCount ?? 0 };
 		},
 		async close() {
@@ -1007,10 +1025,14 @@ interface MssqlPool {
 	close(): Promise<unknown>;
 }
 
+interface MssqlSqlType {
+	readonly declaration?: string;
+}
+
 interface MssqlModule {
 	ConnectionPool: new (config: Record<string, unknown>) => MssqlPool;
-	VarChar(size: number): unknown;
-	Int: unknown;
+	VarChar(size: number): MssqlSqlType;
+	Int: MssqlSqlType;
 	default?: MssqlModule;
 }
 
@@ -1040,14 +1062,8 @@ async function mssqlAdapter(cfg: StoredConn): Promise<DbAdapter> {
 	const main = await getPool(baseCfg.database);
 	async function qual(db: string | undefined, t: string | undefined): Promise<string> {
 		// Look up the real schema instead of assuming dbo.
-		const r = await (
-			await getPool(db)
-		)
-			.request()
-			.input("t", mssql.VarChar(256), t)
-			.query(
-				`SELECT TOP 1 OBJECT_SCHEMA_NAME(object_id) AS s FROM ${qMssql(db)}.sys.objects WHERE name=@t AND type IN ('U','V')`,
-			);
+		const sql = `SELECT TOP 1 OBJECT_SCHEMA_NAME(object_id) AS s FROM ${qMssql(db)}.sys.objects WHERE name=@t AND type IN ('U','V')`;
+		const r = await (await getPool(db)).request().input("t", mssql.VarChar(256), t).query(sql);
 		const found = r.recordset[0]?.s as string | undefined;
 		const schema = found || "dbo";
 		return `${qMssql(db)}.${qMssql(schema)}.${qMssql(t)}`;
@@ -1060,34 +1076,21 @@ async function mssqlAdapter(cfg: StoredConn): Promise<DbAdapter> {
 			return r.recordset.map((x) => String(x.name));
 		},
 		async listTables(db) {
-			const r = await (
-				await getPool(db)
-			)
-				.request()
-				.query(
-					`SELECT name, CASE type WHEN 'U' THEN 'table' ELSE 'view' END AS kind FROM ${qMssql(db)}.sys.objects WHERE type IN ('U','V') ORDER BY name`,
-				);
+			const sql = `SELECT name, CASE type WHEN 'U' THEN 'table' ELSE 'view' END AS kind FROM ${qMssql(db)}.sys.objects WHERE type IN ('U','V') ORDER BY name`;
+			const r = await (await getPool(db)).request().query(sql);
 			return r.recordset.map((x) => ({ name: String(x.name), kind: String(x.kind), approxRows: 0 }));
 		},
 		async describeTable(db, t) {
 			const pool = await getPool(db);
 			const fq = await qual(db, t);
-			const cols = await pool
-				.request()
-				.input("t", mssql.VarChar(256), t)
-				.query(
-					`SELECT COLUMN_NAME AS name, DATA_TYPE AS type, IS_NULLABLE AS nullable, COLUMN_DEFAULT AS def,
-				        CHARACTER_MAXIMUM_LENGTH AS max_len
-				 FROM ${qMssql(db)}.INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME=@t ORDER BY ORDINAL_POSITION`,
-				);
-			const pk = await pool
-				.request()
-				.input("t", mssql.VarChar(256), t)
-				.query(
-					`SELECT ku.COLUMN_NAME AS name FROM ${qMssql(db)}.INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc
+			const colsSql = `SELECT COLUMN_NAME AS name, DATA_TYPE AS type, IS_NULLABLE AS nullable, COLUMN_DEFAULT AS def,
+			        CHARACTER_MAXIMUM_LENGTH AS max_len
+			 FROM ${qMssql(db)}.INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME=@t ORDER BY ORDINAL_POSITION`;
+			const cols = await pool.request().input("t", mssql.VarChar(256), t).query(colsSql);
+			const pkSql = `SELECT ku.COLUMN_NAME AS name FROM ${qMssql(db)}.INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc
 				 JOIN ${qMssql(db)}.INFORMATION_SCHEMA.KEY_COLUMN_USAGE ku ON tc.CONSTRAINT_NAME=ku.CONSTRAINT_NAME
-				 WHERE tc.TABLE_NAME=@t AND tc.CONSTRAINT_TYPE='PRIMARY KEY'`,
-				);
+				 WHERE tc.TABLE_NAME=@t AND tc.CONSTRAINT_TYPE='PRIMARY KEY'`;
+			const pk = await pool.request().input("t", mssql.VarChar(256), t).query(pkSql);
 			const pkSet = new Set(pk.recordset.map((x) => x.name));
 			return {
 				columns: cols.recordset.map((c) => {
@@ -1110,29 +1113,27 @@ async function mssqlAdapter(cfg: StoredConn): Promise<DbAdapter> {
 		async selectPage(db, t, opt) {
 			const pool = await getPool(db);
 			const fq = await qual(db, t);
-			const totalR = await pool.request().query(`SELECT COUNT_BIG(*) AS n FROM ${fq}`);
+			const totalSql = `SELECT COUNT_BIG(*) AS n FROM ${fq}`;
+			const totalR = await pool.request().query(totalSql);
 			const total = Number(totalR.recordset[0]?.n ?? 0);
 			const orderSql = opt.orderBy
 				? ` ORDER BY ${qMssql(opt.orderBy)} ${opt.dir === "desc" ? "DESC" : "ASC"} OFFSET @off ROWS FETCH NEXT @lim ROWS ONLY`
 				: ` ORDER BY (SELECT NULL) OFFSET @off ROWS FETCH NEXT @lim ROWS ONLY`;
+			const pageSql = `SELECT * FROM ${fq}${orderSql}`;
 			const r = await pool
 				.request()
 				.input("off", mssql.Int, Math.max(Number(opt.offset) || 0, 0))
 				.input("lim", mssql.Int, Math.min(Number(opt.limit) || 50, MAX_PAGE_ROWS))
-				.query(`SELECT * FROM ${fq}${orderSql}`);
+				.query(pageSql);
 			const columns = r.recordset.columns
 				? Object.keys(r.recordset.columns)
 				: r.recordset[0]
 					? Object.keys(r.recordset[0])
 					: [];
-			const pkR = await pool
-				.request()
-				.input("t", mssql.VarChar(256), t)
-				.query(
-					`SELECT TOP 1 ku.COLUMN_NAME AS name FROM ${qMssql(db)}.INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc
+			const pkSql = `SELECT TOP 1 ku.COLUMN_NAME AS name FROM ${qMssql(db)}.INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc
 				 JOIN ${qMssql(db)}.INFORMATION_SCHEMA.KEY_COLUMN_USAGE ku ON tc.CONSTRAINT_NAME=ku.CONSTRAINT_NAME
-				 WHERE tc.TABLE_NAME=@t AND tc.CONSTRAINT_TYPE='PRIMARY KEY'`,
-				);
+				 WHERE tc.TABLE_NAME=@t AND tc.CONSTRAINT_TYPE='PRIMARY KEY'`;
+			const pkR = await pool.request().input("t", mssql.VarChar(256), t).query(pkSql);
 			const pkCol = pkR.recordset[0]?.name;
 			return {
 				total,
@@ -1161,7 +1162,8 @@ async function mssqlAdapter(cfg: StoredConn): Promise<DbAdapter> {
 			const req = pool.request().input("pk", pkVal);
 			cols.forEach((c, i) => req.input(`v${i}`, changes[c]));
 			const sets = cols.map((c, i) => `${qMssql(c)}=@v${i}`).join(", ");
-			const r = await req.query(`UPDATE ${fq} SET ${sets} WHERE ${qMssql(pkCol)}=@pk`);
+			const updateSql = `UPDATE ${fq} SET ${sets} WHERE ${qMssql(pkCol)}=@pk`;
+			const r = await req.query(updateSql);
 			return { affected: r.rowsAffected?.[0] ?? 0 };
 		},
 		async insertRow(db, t, values) {
@@ -1171,18 +1173,15 @@ async function mssqlAdapter(cfg: StoredConn): Promise<DbAdapter> {
 			const fq = await qual(db, t);
 			const req = pool.request();
 			cols.forEach((c, i) => req.input(`v${i}`, values[c]));
-			const r = await req.query(
-				`INSERT INTO ${fq} (${cols.map(qMssql).join(", ")}) OUTPUT inserted.* VALUES (${cols.map((_, i) => `@v${i}`).join(", ")})`,
-			);
+			const insertSql = `INSERT INTO ${fq} (${cols.map(qMssql).join(", ")}) OUTPUT inserted.* VALUES (${cols.map((_, i) => `@v${i}`).join(", ")})`;
+			const r = await req.query(insertSql);
 			return { affected: 1, id: r.recordset?.[0] ?? null };
 		},
 		async deleteRow(db, t, pkCol, pkVal) {
 			const pool = await getPool(db);
 			const fq = await qual(db, t);
-			const r = await pool
-				.request()
-				.input("pk", pkVal)
-				.query(`DELETE FROM ${fq} WHERE ${qMssql(pkCol)}=@pk`);
+			const deleteSql = `DELETE FROM ${fq} WHERE ${qMssql(pkCol)}=@pk`;
+			const r = await pool.request().input("pk", pkVal).query(deleteSql);
 			return { affected: r.rowsAffected?.[0] ?? 0 };
 		},
 		async close() {
@@ -1224,9 +1223,15 @@ interface MongoClientLike {
 	close(): Promise<unknown>;
 }
 
+interface MongoObjectId {
+	toString(): string;
+}
+
+type MongoIdentifier = string | number | boolean | object | null | undefined;
+
 interface MongoModule {
 	MongoClient: new (url: string, options: Record<string, unknown>) => MongoClientLike;
-	ObjectId: new (hex: string) => unknown;
+	ObjectId: new (hex: string) => MongoObjectId;
 	default?: Partial<MongoModule>;
 }
 
@@ -1288,7 +1293,8 @@ async function mongoAdapter(cfg: StoredConn): Promise<DbAdapter> {
 				.toArray();
 			// BSON -> plain JSON (_id, dates and friends become strings), while the
 			// structured documents are kept alongside so an edit can be written back.
-			const replacer = (_key: string, value: unknown): unknown => {
+			type JsonReplacerValue = string | number | boolean | object | null | undefined;
+			const replacer = (_key: string, value: unknown): JsonReplacerValue => {
 				const candidate = value as { _bsontype?: unknown; toString?: () => string } | null;
 				if (candidate && typeof candidate === "object" && candidate._bsontype) {
 					if (typeof candidate.toString === "function" && candidate.toString !== Object.prototype.toString) {
@@ -1296,9 +1302,23 @@ async function mongoAdapter(cfg: StoredConn): Promise<DbAdapter> {
 					}
 				}
 				if (typeof value === "bigint") return Number(value);
-				return value;
+				switch (typeof value) {
+					case "string":
+					case "number":
+					case "boolean":
+					case "object":
+					case "undefined":
+						return value;
+					default:
+						return undefined;
+				}
 			};
-			const docs = JSON.parse(JSON.stringify(docsRaw, replacer)) as Record<string, unknown>[];
+			let docs: Record<string, unknown>[];
+			try {
+				docs = JSON.parse(JSON.stringify(docsRaw, replacer)) as Record<string, unknown>[];
+			} catch (err) {
+				throw new Error(`Failed to serialise documents: ${(err as Error).message}`);
+			}
 			return { total, columns: ["doc"], rows: docs.map((d) => [JSON.stringify(d)]), docs, editable: true };
 		},
 		async docSave(db, t, id, docJson) {
@@ -1309,10 +1329,25 @@ async function mongoAdapter(cfg: StoredConn): Promise<DbAdapter> {
 				throw new Error(`Failed to parse document JSON: ${(err as Error).message}`);
 			}
 			if (!body || typeof body !== "object" || Array.isArray(body)) throw new Error("Document must be a JSON object");
-			const toId = (v: unknown): unknown => (typeof v === "string" && /^[0-9a-f]{24}$/i.test(v) ? new ObjectId(v) : v);
+			const toId = (v: MongoIdentifier): MongoIdentifier => {
+				if (typeof v !== "string" || !/^[0-9a-f]{24}$/i.test(v)) return v;
+				try {
+					return new ObjectId(v);
+				} catch {
+					return v;
+				}
+			};
+			const rawId: MongoIdentifier =
+				id === null ||
+				typeof id === "string" ||
+				typeof id === "number" ||
+				typeof id === "boolean" ||
+				typeof id === "object"
+					? id
+					: String(id);
 			const coll = client.db(db).collection(t);
-			const next = { ...(body as Record<string, unknown>), _id: toId(id) };
-			const r = await coll.replaceOne({ _id: toId(id) }, next);
+			const next = { ...(body as Record<string, unknown>), _id: toId(rawId) };
+			const r = await coll.replaceOne({ _id: toId(rawId) }, next);
 			return { affected: r.modifiedCount ?? 0 };
 		},
 		async docInsert(db, t, docJson) {
@@ -1329,11 +1364,26 @@ async function mongoAdapter(cfg: StoredConn): Promise<DbAdapter> {
 			return { affected: 1, id: r.insertedId?.toString?.() ?? null };
 		},
 		async docDelete(db, t, id) {
-			const toId = (v: unknown): unknown => (typeof v === "string" && /^[0-9a-f]{24}$/i.test(v) ? new ObjectId(v) : v);
+			const toId = (v: MongoIdentifier): MongoIdentifier => {
+				if (typeof v !== "string" || !/^[0-9a-f]{24}$/i.test(v)) return v;
+				try {
+					return new ObjectId(v);
+				} catch {
+					return v;
+				}
+			};
+			const rawId: MongoIdentifier =
+				id === null ||
+				typeof id === "string" ||
+				typeof id === "number" ||
+				typeof id === "boolean" ||
+				typeof id === "object"
+					? id
+					: String(id);
 			const r = await client
 				.db(db)
 				.collection(t)
-				.deleteOne({ _id: toId(id) });
+				.deleteOne({ _id: toId(rawId) });
 			return { affected: r.deletedCount ?? 0 };
 		},
 		async query() {
@@ -1392,6 +1442,8 @@ async function redisAdapter(cfg: StoredConn): Promise<DbAdapter> {
 	const mod = await loadDriver<RedisModule>("ioredis");
 	// ioredis has shipped itself as the default export and as a named one; the
 	// module object itself is the last shape older builds used.
+	// SAFETY: older ioredis builds expose the constructor as the module object;
+	// loadDriver has already established that this value is the driver module.
 	const Redis = mod.default ?? mod.Redis ?? (mod as unknown as RedisCtor);
 	const cli = new Redis({
 		host: cfg.host || "127.0.0.1",
@@ -1759,17 +1811,12 @@ const entry: { activate(host: PluginHost): () => void } = {
 			}
 			const npmCli = resolveNpmCli();
 			const args = ["--prefix", host.dir, "install", ...DEPS, "--no-audit", "--no-fund"];
-			// On Windows npm is a .cmd, so node is pointed at npm-cli.js directly
-			// wherever it can be found. Only when it cannot is a shell used, and then
-			// the command is assembled into one quoted string: spawn(cmd, [...args],
-			// {shell:true}) concatenates without escaping, so a directory containing a
-			// space would install into the wrong place (Node reports this as
-			// "arguments are not escaped, only concatenated").
+			// On Windows npm is a .cmd; invoke it directly so argument boundaries remain
+			// intact even when the plugin directory contains spaces.
 			const child = npmCli
 				? spawn(process.execPath, [npmCli, ...args], { stdio: ["ignore", "ignore", "pipe"] })
-				: spawn(`npm ${args.map((a) => winQuote(a)).join(" ")}`, [], {
+				: spawn(process.platform === "win32" ? "npm.cmd" : "npm", args, {
 						stdio: ["ignore", "ignore", "pipe"],
-						shell: true,
 					});
 			st.installer = child;
 			// Watchdog: kill an install that never finishes, so the UI does not spin
