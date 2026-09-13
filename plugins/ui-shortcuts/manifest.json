@@ -1,0 +1,7 @@
+{
+	"id": "ui-shortcuts",
+	"name": "UI Shortcuts",
+	"version": "0.1.0",
+	"icon": "⌨️",
+	"description": "Keyboard shortcuts for switching between the Terminal, Editor and Run Trace views."
+}

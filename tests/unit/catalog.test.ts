@@ -16,13 +16,14 @@ import { findCjk, formatCjkHits, repoPath } from "../helpers/repo-files";
 
 const CATALOG_REL = "plugins/catalog.json";
 
-/** The seven plugins this repo ships. legado-web and demo-mailbox are not ported. */
+/** The eight plugins this repo ships. legado-web and demo-mailbox are not ported. */
 const EXPECTED_IDS = [
 	"db-client",
 	"image-toolkit",
 	"mcp-manager",
 	"mermaid",
 	"run-trace",
+	"ui-shortcuts",
 	"vscode-editor",
 	"webmail",
 ].sort();
@@ -80,7 +81,7 @@ describe("plugins/catalog.json", () => {
 		expect((parsed as unknown[]).length).toBe(EXPECTED_IDS.length);
 	});
 
-	it("lists exactly the six plugins this repo ships", () => {
+	it("lists exactly the eight plugins this repo ships", () => {
 		const ids = readCatalog()
 			.map((entry) => entry.id)
 			.sort();

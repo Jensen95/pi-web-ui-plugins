@@ -1,8 +1,8 @@
 # pi-web-ui-plugins
 
 Interface plugins for [pi-web-ui](https://github.com/xing-shuyin/pi-web-ui), the web chat UI for the
-[pi](https://github.com/badlogic/pi-mono) coding agent. Each plugin adds a tab, an agent tool, or a
-fenced-code renderer to that UI.
+[pi](https://github.com/badlogic/pi-mono) coding agent. Each plugin adds a tab, an agent tool, a shortcut,
+or a fenced-code renderer to that UI.
 
 These are English-only TypeScript ports of the upstream plugins. See
 [Acknowledgements](#acknowledgements) for where they came from.
@@ -18,6 +18,7 @@ These are English-only TypeScript ports of the upstream plugins. See
 | `run-trace`     | 🧭   | Aggregates a run into one replayable timeline: task, reasoning, tool calls, file changes, result.                          | none                                      |
 | `mcp-manager`   | 🔌   | Manages MCP servers through `pi-mcp-adapter`: inspect the effective config, enable or disable servers, add or remove them. | `http`                                    |
 | `image-toolkit` | 🖼    | Compresses, crops, resizes, converts, watermarks and inspects workspace images, with four AI tools.                        | `fs`, `http`, `tools`                     |
+| `ui-shortcuts`  | ⌨️   | Switches between the Terminal, Editor and Run Trace views with global keyboard shortcuts.                                  | none                                      |
 
 `plugins/catalog.json` is the machine-readable form of this table. pi-web-ui reads it as its built-in
 plugin-marketplace list, so the two must not drift.
@@ -33,6 +34,7 @@ pi-web-ui install Jensen95/pi-web-ui-plugins/plugins/image-toolkit
 pi-web-ui install Jensen95/pi-web-ui-plugins/plugins/mcp-manager
 pi-web-ui install Jensen95/pi-web-ui-plugins/plugins/mermaid
 pi-web-ui install Jensen95/pi-web-ui-plugins/plugins/run-trace
+pi-web-ui install Jensen95/pi-web-ui-plugins/plugins/ui-shortcuts
 pi-web-ui install Jensen95/pi-web-ui-plugins/plugins/vscode-editor
 pi-web-ui install Jensen95/pi-web-ui-plugins/plugins/webmail
 ```

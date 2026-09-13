@@ -54,5 +54,13 @@
 		"description": "Manage MCP servers from the web UI through pi-mcp-adapter: inspect the effective configuration with its provenance, enable or disable servers, and add or remove them.",
 		"source": "Jensen95/pi-web-ui-plugins/plugins/mcp-manager",
 		"homepage": "https://github.com/Jensen95/pi-web-ui-plugins/tree/main/plugins/mcp-manager"
+	},
+	{
+		"id": "ui-shortcuts",
+		"name": "UI Shortcuts",
+		"icon": "⌨️",
+		"description": "Switch between the Terminal, Editor and Run Trace views with global keyboard shortcuts.",
+		"source": "Jensen95/pi-web-ui-plugins/plugins/ui-shortcuts",
+		"homepage": "https://github.com/Jensen95/pi-web-ui-plugins/tree/main/plugins/ui-shortcuts"
 	}
 ]
