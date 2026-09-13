@@ -67,12 +67,15 @@ export function repoPath(...parts: string[]): string {
 	return join(REPO_ROOT, ...parts);
 }
 
-/** Plugin ids: directory names under plugins/. */
+/** UI plugin ids: directories under plugins/ with a host manifest. */
 export function pluginIds(): string[] {
 	const dir = repoPath("plugins");
 	if (!existsSync(dir)) return [];
 	return readdirSync(dir)
-		.filter((name) => statSync(join(dir, name)).isDirectory())
+		.filter((name) => {
+			const plugin = join(dir, name);
+			return statSync(plugin).isDirectory() && existsSync(join(plugin, "manifest.json"));
+		})
 		.sort();
 }
 

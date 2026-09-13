@@ -59,7 +59,7 @@
 		"id": "ui-shortcuts",
 		"name": "UI Shortcuts",
 		"icon": "⌨️",
-		"description": "Switch between the Terminal, Editor and Run Trace views with global keyboard shortcuts.",
+		"description": "Switch between views with keyboard shortcuts, or bind composer drafts and new-chat prompts to custom keys.",
 		"source": "Jensen95/pi-web-ui-plugins/plugins/ui-shortcuts",
 		"homepage": "https://github.com/Jensen95/pi-web-ui-plugins/tree/main/plugins/ui-shortcuts"
 	}

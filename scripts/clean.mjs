@@ -58,6 +58,12 @@ for (const id of pluginDirs) {
 	}
 }
 
+const extensionDist = join(PLUGINS_DIR, "page-picker", "extension", "dist");
+if (existsSync(extensionDist)) {
+	rmSync(extensionDist, { recursive: true, force: true });
+	removed.push("plugins/page-picker/extension/dist/");
+}
+
 for (const path of removed) console.log(`- removed ${path}`);
 for (const path of refused) console.log(`! kept    ${path}`);
 console.log(`\nclean: ${removed.length} removed, ${refused.length} kept`);

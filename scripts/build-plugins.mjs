@@ -40,11 +40,14 @@ const VENDOR_BUILDS = [
 	{ pluginId: "run-trace", script: "build-runtrace-vendor.mjs" },
 ];
 
-/** Plugin directory names, sorted, ignoring anything that is not a directory. */
+/** Catalog plugin directory names, sorted, ignoring standalone directories without a manifest. */
 function pluginIds() {
 	if (!existsSync(PLUGINS_DIR)) return [];
 	return readdirSync(PLUGINS_DIR)
-		.filter((name) => statSync(join(PLUGINS_DIR, name)).isDirectory())
+		.filter((name) => {
+			const dir = join(PLUGINS_DIR, name);
+			return statSync(dir).isDirectory() && existsSync(join(dir, "manifest.json"));
+		})
 		.sort();
 }
 

@@ -3,7 +3,7 @@
 	"version": "0.1.0",
 	"private": true,
 	"type": "module",
-	"description": "English-only TypeScript ports of the pi-web-ui interface plugins: run-trace, mermaid, db-client, mcp-manager, vscode-editor, webmail and ui-shortcuts.",
+	"description": "English-only TypeScript ports of pi-web-ui interface plugins plus the standalone Page Picker browser extension.",
 	"license": "MIT",
 	"author": {
 		"name": "Jensen95"
@@ -32,6 +32,8 @@
 		"build:webmail": "node scripts/build-plugins.mjs webmail",
 		"build:image-toolkit": "node scripts/build-plugins.mjs image-toolkit",
 		"build:ui-shortcuts": "node scripts/build-plugins.mjs ui-shortcuts",
+		"build:extension": "node plugins/page-picker/extension/build.mjs",
+		"pack:extension": "node plugins/page-picker/extension/pack.mjs",
 		"clean": "node scripts/clean.mjs",
 		"clean:force": "node scripts/clean.mjs --force",
 		"check:english": "node scripts/check-english.mjs"

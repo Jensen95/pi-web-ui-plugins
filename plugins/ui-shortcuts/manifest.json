@@ -3,5 +3,5 @@
 	"name": "UI Shortcuts",
 	"version": "0.1.0",
 	"icon": "⌨️",
-	"description": "Keyboard shortcuts for switching between the Terminal, Editor and Run Trace views."
+	"description": "Keyboard shortcuts for switching views, with custom bindings for views, composer drafts, and new-chat prompts."
 }

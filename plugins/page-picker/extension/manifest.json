@@ -1,0 +1,24 @@
+{
+	"manifest_version": 3,
+	"name": "pi-web-ui Page Picker",
+	"version": "0.4.0",
+	"description": "Pick elements from a development page, collect useful DOM, CSS, and source context, and send it to the pi-web-ui composer. It also provides an opt-in page bridge and AI page controls.",
+	"minimum_chrome_version": "116",
+	"permissions": ["activeTab", "scripting", "storage"],
+	"host_permissions": ["http://localhost/*", "http://127.0.0.1/*"],
+	"optional_host_permissions": ["http://*/*", "https://*/*"],
+	"background": {
+		"service_worker": "dist/background.js",
+		"type": "module"
+	},
+	"action": {
+		"default_title": "Pick a web element and add it to pi-web-ui"
+	},
+	"options_page": "options.html",
+	"commands": {
+		"toggle-picking": {
+			"suggested_key": { "default": "Alt+Shift+P" },
+			"description": "Start picking web elements"
+		}
+	}
+}

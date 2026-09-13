@@ -1,0 +1,340 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<title>pi-web-ui Page Picker · Options</title>
+		<style>
+			:root {
+				color-scheme: dark;
+				--bg: #0f172a;
+				--card: #1e293b;
+				--line: #334155;
+				--text: #e2e8f0;
+				--dim: #94a3b8;
+				--accent: #2563eb;
+			}
+			body {
+				margin: 0;
+				padding: 28px;
+				background: var(--bg);
+				color: var(--text);
+				font:
+					14px/1.6 -apple-system,
+					"Segoe UI",
+					sans-serif;
+			}
+			main {
+				max-width: 680px;
+				margin: 0 auto;
+			}
+			h1 {
+				font-size: 18px;
+				margin: 0 0 4px;
+			}
+			.hint {
+				color: var(--dim);
+				font-size: 13px;
+				margin-bottom: 20px;
+			}
+			fieldset {
+				border: 1px solid var(--line);
+				border-radius: 10px;
+				background: var(--card);
+				padding: 14px 16px;
+				margin: 0 0 14px;
+			}
+			legend {
+				padding: 0 6px;
+				color: var(--dim);
+				font-size: 12px;
+			}
+			label.row {
+				display: flex;
+				align-items: center;
+				gap: 10px;
+				margin: 8px 0;
+			}
+			label.row > span:first-child {
+				flex: 0 0 190px;
+			}
+			input[type="text"],
+			input[type="password"],
+			select {
+				flex: 1 1 auto;
+				min-width: 0;
+				padding: 6px 9px;
+				border-radius: 6px;
+				border: 1px solid var(--line);
+				background: #0b1220;
+				color: var(--text);
+				font-size: 13px;
+			}
+			label.check {
+				display: flex;
+				gap: 8px;
+				align-items: flex-start;
+				margin: 8px 0;
+			}
+			label.check span b {
+				display: block;
+				font-weight: 600;
+			}
+			label.check span i {
+				color: var(--dim);
+				font-style: normal;
+				font-size: 12px;
+			}
+			.actions {
+				display: flex;
+				gap: 8px;
+				align-items: center;
+				flex-wrap: wrap;
+			}
+			button {
+				padding: 7px 12px;
+				border-radius: 7px;
+				border: 1px solid var(--line);
+				background: #24324a;
+				color: var(--text);
+				font-size: 13px;
+				cursor: pointer;
+			}
+			button.primary {
+				background: var(--accent);
+				border-color: var(--accent);
+				color: #fff;
+				font-weight: 600;
+			}
+			.status {
+				margin-left: auto;
+				font-size: 12px;
+			}
+			.status.ok {
+				color: #4ade80;
+			}
+			.status.err {
+				color: #f87171;
+			}
+			.status.info {
+				color: var(--dim);
+			}
+			.status.warn {
+				color: #fbbf24;
+			}
+			.grant-state {
+				margin-top: 10px;
+				font-size: 12px;
+			}
+			.grant-state.ok {
+				color: #4ade80;
+			}
+			.grant-state.warn {
+				color: #fbbf24;
+			}
+			.cols {
+				display: grid;
+				grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+				gap: 2px 14px;
+				margin-top: 4px;
+			}
+			.cols label.check span b {
+				font-weight: 500;
+				font-size: 13px;
+			}
+			.cols label.check span i {
+				display: block;
+			}
+			.bind-panel {
+				margin-top: 12px;
+				padding: 12px;
+				border: 1px solid var(--accent);
+				border-radius: 8px;
+				background: rgba(37, 99, 235, 0.12);
+			}
+			.bind-panel b {
+				display: block;
+				margin-bottom: 4px;
+			}
+			.pair-list {
+				margin-top: 12px;
+				display: flex;
+				flex-direction: column;
+				gap: 8px;
+			}
+			.pair {
+				border: 1px solid var(--line);
+				border-radius: 8px;
+				padding: 10px 12px;
+				background: #0b1220;
+			}
+			.pair .who {
+				font-weight: 600;
+				word-break: break-all;
+			}
+			.pair .meta {
+				color: var(--dim);
+				font-size: 12px;
+				margin-top: 2px;
+			}
+			.pair .actions {
+				margin-top: 8px;
+			}
+			.pair.off {
+				opacity: 0.6;
+			}
+			.empty {
+				color: var(--dim);
+				font-size: 13px;
+			}
+			.hidden {
+				display: none !important;
+			}
+			code {
+				background: #0b1220;
+				padding: 1px 5px;
+				border-radius: 4px;
+				font-size: 12px;
+			}
+		</style>
+	</head>
+	<body>
+		<main>
+			<h1>pi-web-ui Page Picker</h1>
+			<div class="hint">
+				Click the extension icon or press <code>Alt+Shift+P</code> on a development page. Picked elements become context
+				in the pi-web-ui composer; add your own note before sending.
+			</div>
+
+			<fieldset>
+				<legend>pi-web-ui service</legend>
+				<label class="row"
+					><span>Service URL</span><input id="serverUrl" type="text" placeholder="http://127.0.0.1:8787"
+				/></label>
+				<label class="row"
+					><span>PI_WEB_TOKEN</span
+					><input id="token" type="password" placeholder="Leave empty when authentication is off"
+				/></label>
+				<div class="actions">
+					<button id="grant">Authorize address</button><button id="test">Test connection</button
+					><span id="status" class="status info"></span>
+				</div>
+				<div class="hint" style="margin: 10px 0 0">
+					Localhost and 127.0.0.1 are pre-authorized. For a LAN, remote, or HTTPS URL, authorize the exact address
+					first. The easiest option is to click the extension icon on the open pi-web-ui page. Delivery targets that
+					open browser tab, so keep it open; otherwise the extension copies Markdown as a fallback.
+				</div>
+				<div class="grant-state warn" id="grantState"></div>
+				<div class="bind-panel hidden" id="bindPanel">
+					<b id="bindTitle">Detected pi-web-ui page</b>
+					<div class="hint" id="bindBody" style="margin: 0"></div>
+					<div class="actions" style="margin-top: 10px">
+						<button class="primary" id="bindAccept">Authorize and bind</button><button id="bindDismiss">Dismiss</button>
+					</div>
+				</div>
+			</fieldset>
+
+			<fieldset>
+				<legend>AI page control</legend>
+				<div class="hint" style="margin: 0 0 10px">
+					After authorization, the model can use the <code>browser_page</code> tool through the open pi-web-ui tab. It
+					can read, click, type, scroll, navigate, wait, and optionally run JavaScript or capture a screenshot. Only
+					authorize pages you trust; permissions can be revoked at any time.
+				</div>
+				<label class="check"
+					><input id="aiControl" type="checkbox" /><span
+						><b>Allow AI page control</b><i>Disabling this rejects every page action.</i></span
+					></label
+				>
+				<label class="check"
+					><input id="allowEval" type="checkbox" /><span
+						><b>Allow arbitrary JavaScript (eval)</b
+						><i>Off by default because scripts can change data, submit forms, or make requests.</i></span
+					></label
+				>
+				<label class="check"
+					><input id="allowShot" type="checkbox" /><span
+						><b>Allow screenshots</b
+						><i>Requires the browser's all-websites screenshot permission and briefly focuses the target tab.</i></span
+					></label
+				>
+				<label class="row"
+					><span>Page to authorize</span
+					><input id="aiPageInput" type="text" list="piOrigins" placeholder="http://localhost:5173"
+				/></label>
+				<div class="actions">
+					<button class="primary" id="aiGrant">Authorize page</button><span id="aiStatus" class="status info"></span>
+				</div>
+				<div class="pair-list" id="aiList"></div>
+				<div class="hint" style="margin: 10px 0 0">
+					Click the extension icon once on a target page to add it to the candidate list, or use the picker bar's "Let
+					AI control this page..." action.
+				</div>
+			</fieldset>
+
+			<fieldset>
+				<legend>Page bridge</legend>
+				<div class="hint" style="margin: 0 0 10px">
+					Pair two trusted pages to let their scripts call one another. A receiving page can register
+					<code>window.__piBridge.on("readOrders", () =&gt; ...)</code>; the caller can use
+					<code>await window.__piBridge.call({ op: "readOrders" })</code>. The bridge is off by default and only listed
+					pairs are allowed.
+				</div>
+				<label class="row"
+					><span>Endpoint A</span><input id="pairA" type="text" list="piOrigins" placeholder="http://localhost:5173"
+				/></label>
+				<label class="row"
+					><span>Endpoint B</span><input id="pairB" type="text" list="piOrigins" placeholder="https://tools.example"
+				/></label>
+				<label class="row"
+					><span>Note (optional)</span><input id="pairNote" type="text" placeholder="Orders page to local tools page"
+				/></label>
+				<datalist id="piOrigins"></datalist>
+				<div class="actions">
+					<button class="primary" id="pairAdd">Authorize and add pair</button
+					><span id="pairStatus" class="status info"></span>
+				</div>
+				<div class="pair-list" id="pairList"></div>
+				<div class="hint" style="margin: 10px 0 0">
+					Click the extension icon once on each page to add both addresses to the candidate list. The bridge refuses
+					closed pages, unknown actions, and oversized results instead of failing silently.
+				</div>
+			</fieldset>
+
+			<fieldset>
+				<legend>Context sections</legend>
+				<div class="hint" style="margin: 0 0 10px">
+					Only selected sections are collected and sent. Start with a preset and adjust it when needed.
+				</div>
+				<label class="row"
+					><span>Preset</span
+					><select id="preset"></select
+				></label>
+				<div class="cols" id="sectionList"></div>
+				<label class="check" style="margin-top: 12px"
+					><input id="screenshots" type="checkbox" /><span
+						><b>Capture element screenshots</b><i>Attach images to the conversation when available.</i></span
+					></label
+				>
+				<div class="hint" id="sectionSummary" style="margin-top: 6px"></div>
+			</fieldset>
+
+			<fieldset>
+				<legend>Delivery</legend>
+				<label class="check"
+					><input id="copyToClipboard" type="checkbox" /><span
+						><b>Also copy Markdown to the clipboard</b
+						><i>Recommended fallback when the composer is closed or unavailable.</i></span
+					></label
+				>
+				<label class="check"
+					><input id="focusTarget" type="checkbox" /><span
+						><b>Focus the pi-web-ui tab after delivery</b><i>Turn this off to remain on the development page.</i></span
+					></label
+				>
+			</fieldset>
+
+			<div class="actions"><button id="reset">Restore defaults</button></div>
+		</main>
+		<script type="module" src="dist/options.js"></script>
+	</body>
+</html>

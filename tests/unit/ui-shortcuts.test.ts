@@ -5,6 +5,7 @@ interface FakeEventTarget {
 	addEventListener(type: string, listener: (event: FakeKeyEvent) => void): void;
 	removeEventListener(type: string, listener: (event: FakeKeyEvent) => void): void;
 	dispatchKey(event: FakeKeyEvent): void;
+	localStorage: { getItem(key: string): string | null; setItem(key: string, value: string): void };
 }
 
 interface FakeKeyEvent {
@@ -23,14 +24,18 @@ interface FakeKeyEvent {
 interface FakeElement {
 	tagName: string;
 	textContent: string;
+	value: string;
+	type: string;
+	placeholder: string;
 	dataset: Record<string, string>;
 	disabled: boolean;
 	children: FakeElement[];
 	ownerDocument: FakeDocument;
-	addEventListener(type: string, listener: () => void): void;
+	addEventListener(type: string, listener: (event?: unknown) => void): void;
 	append(...children: FakeElement[]): void;
 	replaceChildren(...children: FakeElement[]): void;
 	click(): void;
+	dispatch(type: string, event?: unknown): void;
 	setAttribute(name: string, value: string): void;
 }
 
@@ -41,6 +46,7 @@ interface FakeDocument {
 
 function createFakeDom(): { document: FakeDocument; container: FakeElement } {
 	const windowListeners = new Map<string, Set<(event: FakeKeyEvent) => void>>();
+	const values = new Map<string, string>();
 	const defaultView: FakeDocument["defaultView"] = {
 		addEventListener(type, listener) {
 			let listeners = windowListeners.get(type);
@@ -53,14 +59,21 @@ function createFakeDom(): { document: FakeDocument; container: FakeElement } {
 		dispatchKey(event) {
 			for (const listener of windowListeners.get("keydown") ?? []) listener(event);
 		},
+		localStorage: {
+			getItem: (key) => values.get(key) ?? null,
+			setItem: (key, value) => void values.set(key, value),
+		},
 	};
 
 	const document = {} as FakeDocument;
 	const makeElement = (tagName: string): FakeElement => {
-		const listeners = new Map<string, Set<() => void>>();
+		const listeners = new Map<string, Set<(event?: unknown) => void>>();
 		const element: FakeElement = {
 			tagName,
 			textContent: "",
+			value: "",
+			type: "",
+			placeholder: "",
 			dataset: {},
 			disabled: false,
 			children: [],
@@ -80,6 +93,9 @@ function createFakeDom(): { document: FakeDocument; container: FakeElement } {
 				if (!element.disabled) {
 					for (const listener of listeners.get("click") ?? []) listener();
 				}
+			},
+			dispatch(type, event) {
+				for (const listener of listeners.get(type) ?? []) listener(event);
 			},
 			setAttribute(name, value) {
 				if (name === "data-view") element.dataset.view = value;
@@ -102,6 +118,10 @@ function key(overrides: Partial<FakeKeyEvent> = {}): FakeKeyEvent {
 		preventDefault: vi.fn(),
 		...overrides,
 	};
+}
+
+function descendants(root: FakeElement): FakeElement[] {
+	return root.children.flatMap((child) => [child, ...descendants(child)]);
 }
 
 describe("UI shortcuts client contract", () => {
@@ -143,15 +163,39 @@ describe("UI shortcuts client contract", () => {
 		document.defaultView.__piWebUiHost = { setView };
 
 		const cleanup = clientEntry.mount?.(container as unknown as HTMLElement, {});
-		expect(container.children.map((child) => child.textContent)).toEqual(["Terminal", "Editor", "Run Trace"]);
-		expect(container.children.map((child) => child.dataset.key)).toEqual(["Ctrl+Alt+T", "Ctrl+Alt+E", "Ctrl+Alt+R"]);
+		const buttons = container.children.filter((child) => child.dataset.view);
+		expect(buttons.map((child) => child.textContent)).toEqual(["Terminal", "Editor", "Run Trace"]);
+		expect(buttons.map((child) => child.dataset.key)).toEqual(["Ctrl+Alt+T", "Ctrl+Alt+E", "Ctrl+Alt+R"]);
 
-		container.children[0]?.click();
-		container.children[0]?.click();
-		container.children[1]?.click();
+		buttons[0]?.click();
+		buttons[0]?.click();
+		buttons[1]?.click();
 		expect(setView.mock.calls).toEqual([["terminal"], ["chat"], ["plugin:vscode-editor"]]);
 		cleanup?.();
 		expect(container.children).toEqual([]);
+	});
+
+	it("renders a custom shortcut form and persists a new view action", () => {
+		const { document, container } = createFakeDom();
+		const setView = vi.fn();
+		document.defaultView.__piWebUiHost = { setView };
+		const cleanup = clientEntry.mount?.(container as unknown as HTMLElement, {});
+		const form = descendants(container).find((element) => element.dataset.ui === "shortcut-form");
+		expect(form).toBeDefined();
+		const fields = new Map(
+			descendants(form!)
+				.filter((element) => element.dataset.field)
+				.map((element) => [element.dataset.field, element]),
+		);
+		fields.get("label")!.value = "Open terminal";
+		fields.get("shortcut")!.value = "Ctrl+Alt+K";
+		fields.get("action")!.value = "view";
+		fields.get("value")!.value = "terminal";
+		form!.dispatch("submit", { preventDefault: vi.fn() });
+		expect(document.defaultView.localStorage.getItem("pi-web-ui.ui-shortcuts.bindings")).toContain("Open terminal");
+		document.defaultView.dispatchKey(key({ key: "k" }));
+		expect(setView).toHaveBeenCalledWith("terminal");
+		cleanup?.();
 	});
 
 	it("handles keyboard shortcuts globally without stealing editable input", () => {

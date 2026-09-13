@@ -26,6 +26,8 @@ jobs:
       # Rebuild ignored entries for most plugins and refresh the tracked image-toolkit
       # entries. An archive without them would install a plugin that cannot run.
       - run: npm run build
+      - run: npm run build:extension
+      - run: npm run pack:extension
 
       # Never publish an artifact this repo's own hard rule forbids.
       - run: npm run check:english
@@ -105,7 +107,9 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: pi-web-ui-plugins
-          path: dist/release/*.tar.gz
+          path: |
+            dist/release/*.tar.gz
+            release/page-picker-extension*.zip
           if-no-files-found: error
 
       # Attach to a GitHub Release for tag pushes. Idempotent, so re-running a
@@ -120,5 +124,5 @@ jobs:
           if ! gh release view "$tag" >/dev/null 2>&1; then
             gh release create "$tag" --title "$tag" --generate-notes
           fi
-          gh release upload "$tag" dist/release/*.tar.gz --clobber
+          gh release upload "$tag" dist/release/*.tar.gz release/page-picker-extension*.zip --clobber
           gh release view "$tag"

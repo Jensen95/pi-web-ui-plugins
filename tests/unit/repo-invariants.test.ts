@@ -333,7 +333,8 @@ describe("TypeScript layout", () => {
 				!/^plugins\/[^/]+\/index\.mjs$/.test(file) &&
 				!/^plugins\/[^/]+\/client\/entry\.mjs$/.test(file) &&
 				!/^plugins\/[^/]+\/client\/vendor\//.test(file) &&
-				!/^plugins\/image-toolkit\/(core\/|client\/(?!entry\.mjs$))/.test(file),
+				!/^plugins\/image-toolkit\/(core\/|client\/(?!entry\.mjs$))/.test(file) &&
+				!file.startsWith("plugins/page-picker/extension/"),
 		);
 		expect(strays, `delete these; src/*.ts replaced them:\n${strays.join("\n")}`).toEqual([]);
 	});

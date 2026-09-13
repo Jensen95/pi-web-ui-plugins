@@ -9,19 +9,34 @@ These are English-only TypeScript ports of the upstream plugins. See
 
 ## Plugins
 
-| id              | icon | What it does                                                                                                               | Permissions                               |
-| --------------- | ---- | -------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
-| `webmail`       | 📬   | IMAP inbox, SMTP sending and new-mail notifications, with an optional switch that lets the agent manage the mailbox.       | `net:imap/smtp`, `tools`                  |
-| `db-client`     | 🗄️   | Schema browsing, SQL queries and row editing across MySQL, PostgreSQL, SQLite, SQL Server, MongoDB and Redis.              | `net`, `tools`                            |
-| `vscode-editor` | 📝   | Multi-root file tree, tabbed CodeMirror editing, xterm.js terminals, Remote-SSH browsing and SFTP sync.                    | `fs:workspace+ssh`, `net:ssh`, `terminal` |
-| `mermaid`       | 📊   | Renders `mermaid` fences in messages as SVG. Renderer plugin, so the engine loads only when such a fence appears.          | none                                      |
-| `run-trace`     | 🧭   | Aggregates a run into one replayable timeline: task, reasoning, tool calls, file changes, result.                          | none                                      |
-| `mcp-manager`   | 🔌   | Manages MCP servers through `pi-mcp-adapter`: inspect the effective config, enable or disable servers, add or remove them. | `http`                                    |
-| `image-toolkit` | 🖼    | Compresses, crops, resizes, converts, watermarks and inspects workspace images, with four AI tools.                        | `fs`, `http`, `tools`                     |
-| `ui-shortcuts`  | ⌨️   | Switches between the Terminal, Editor and Run Trace views with global keyboard shortcuts.                                  | none                                      |
+| id              | icon | What it does                                                                                                                 | Permissions                               |
+| --------------- | ---- | ---------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
+| `webmail`       | 📬   | IMAP inbox, SMTP sending and new-mail notifications, with an optional switch that lets the agent manage the mailbox.         | `net:imap/smtp`, `tools`                  |
+| `db-client`     | 🗄️   | Schema browsing, SQL queries and row editing across MySQL, PostgreSQL, SQLite, SQL Server, MongoDB and Redis.                | `net`, `tools`                            |
+| `vscode-editor` | 📝   | Multi-root file tree, tabbed CodeMirror editing, xterm.js terminals, Remote-SSH browsing and SFTP sync.                      | `fs:workspace+ssh`, `net:ssh`, `terminal` |
+| `mermaid`       | 📊   | Renders `mermaid` fences in messages as SVG. Renderer plugin, so the engine loads only when such a fence appears.            | none                                      |
+| `run-trace`     | 🧭   | Aggregates a run into one replayable timeline: task, reasoning, tool calls, file changes, result.                            | none                                      |
+| `mcp-manager`   | 🔌   | Manages MCP servers through `pi-mcp-adapter`: inspect the effective config, enable or disable servers, add or remove them.   | `http`                                    |
+| `image-toolkit` | 🖼    | Compresses, crops, resizes, converts, watermarks and inspects workspace images, with four AI tools.                          | `fs`, `http`, `tools`                     |
+| `ui-shortcuts`  | ⌨️   | Switches between the Terminal, Editor and Run Trace views, with a small UI for custom view, compose, and new-chat shortcuts. | none                                      |
 
 `plugins/catalog.json` is the machine-readable form of this table. pi-web-ui reads it as its built-in
 plugin-marketplace list, so the two must not drift.
+
+## Browser extension
+
+`plugins/page-picker/extension/` is the standalone **pi-web-ui Page Picker** Chrome/Edge extension. It is not a
+pi-web-ui plugin and is intentionally absent from the catalog. It picks development-page elements, sends focused
+context to the composer, and optionally provides AI page control and an explicit page bridge.
+
+```sh
+npm run build:extension
+npm run pack:extension
+```
+
+Load `plugins/page-picker/extension/` as an unpacked extension after building, or install
+`release/page-picker-extension.zip` from a tagged release. See
+[`plugins/page-picker/README.md`](plugins/page-picker/README.md) for the full setup and permission model.
 
 ## Installing plugins
 
@@ -69,10 +84,11 @@ on first activation via `ensureDeps`.
 
 ```sh
 npm install              # once; every dependency lives in the root package.json
-npm run build            # compile every plugin plus the two vendor bundles
+npm run build            # compile every pi-web-ui plugin plus the two vendor bundles
+npm run build:extension  # build the standalone Page Picker browser extension
 npm run build:mermaid    # compile one plugin (also available for every other id)
 npm test                 # vitest, tests/unit/*.test.ts
-npm run typecheck        # tsc --noEmit, strict, over plugins/*/src and tests
+npm run typecheck        # tsc --noEmit, strict, over plugin and extension TypeScript plus tests
 npm run lint             # oxlint over plugins/, scripts/, tests/
 npm run check:english    # fail on any CJK character in the repo or its artifacts
 npm run format           # prettier --write (tabs, printWidth 120)
@@ -115,8 +131,8 @@ plugins/<id>/
   client/vendor/*      GENERATED  - tracked, third-party bundles
 ```
 
-All runnable entries and required browser/vendor modules are tracked so every GitHub subdirectory install works
-without downloading an archive or running a build. The TypeScript sources remain the source for regeneration.
+All runnable entries and required browser/vendor modules for catalog plugins are tracked so every GitHub subdirectory install works
+without downloading an archive or running a build. The Page Picker extension is built separately from its TypeScript sources.
 
 `scripts/build-plugins.mjs` is convention-driven: one shared builder walks `plugins/*/`, and there are no
 per-plugin build files or `package.json` files. Server bundles keep npm specifiers external
@@ -148,9 +164,10 @@ are still flagged there.
 ## Acknowledgements
 
 These plugins are derivative works of [pi-web-ui](https://github.com/xing-shuyin/pi-web-ui), used under the
-MIT License. The upstream project is where the plugin host contract, the plugin architecture and the original
-implementations of `webmail`, `db-client`, `vscode-editor`, `mermaid` and `run-trace` come from. This
-repository ports them to English and converts them to TypeScript.
+MIT License. The upstream project is where the plugin host contract, the plugin architecture, the original
+implementations of `webmail`, `db-client`, `vscode-editor`, `mermaid`, `run-trace`, and the Page Picker extension
+come from. This repository ports them to English and converts the plugin and extension sources to TypeScript. The
+Page Picker remains a separate browser-side deliverable rather than a catalog plugin.
 
 The upstream copyright notice, which MIT requires be carried into derivative works:
 
