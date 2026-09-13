@@ -102,7 +102,7 @@ jobs:
           fi
           echo "packaged ${count} plugin archive(s)"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: pi-web-ui-plugins
           path: dist/release/*.tar.gz
