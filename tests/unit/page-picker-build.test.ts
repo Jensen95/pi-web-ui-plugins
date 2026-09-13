@@ -14,6 +14,24 @@ function run(script: string): void {
 }
 
 describe("page-picker extension packaging", () => {
+	it("declares Chromium and Firefox background entry points", () => {
+		const manifest = JSON.parse(readFileSync(join(extension, "manifest.json"), "utf8")) as {
+			background?: { scripts?: string[]; service_worker?: string };
+			browser_specific_settings?: { gecko?: { id?: string; strict_min_version?: string } };
+			minimum_chrome_version?: string;
+		};
+		expect(manifest.background).toEqual({
+			scripts: ["dist/background.js"],
+			service_worker: "dist/background.js",
+			type: "module",
+		});
+		expect(manifest.browser_specific_settings?.gecko).toMatchObject({
+			id: "page-picker@pi-web-ui",
+			strict_min_version: "128.0",
+		});
+		expect(manifest.minimum_chrome_version).toBe("121");
+	});
+
 	it("builds every MV3 entry point from the extension sources", () => {
 		run("build.mjs");
 		for (const entry of requiredEntries) {

@@ -9,7 +9,7 @@ mkdirSync(outdir, { recursive: true });
 
 const common = {
 	bundle: true,
-	target: "chrome116",
+	target: ["chrome121", "firefox128"],
 	sourcemap: false,
 	logLevel: "info",
 	legalComments: "none",

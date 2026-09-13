@@ -1,6 +1,6 @@
 # pi-web-ui Page Picker
 
-A Chrome/Edge MV3 extension that turns selected elements from a development page into focused context for the [pi-web-ui](https://github.com/xing-shuyin/pi-web-ui) composer.
+A Chrome, Edge, and Firefox MV3 extension that turns selected elements from a development page into focused context for the [pi-web-ui](https://github.com/xing-shuyin/pi-web-ui) composer.
 
 It can collect:
 
@@ -20,10 +20,11 @@ This is a browser extension, not a pi-web-ui server plugin. It is intentionally 
 
 1. Download `page-picker-extension.zip` from the latest GitHub release.
 2. Extract it.
-3. Open `chrome://extensions` or `edge://extensions`.
-4. Enable **Developer mode** and choose **Load unpacked**.
-5. Select the extracted directory containing `manifest.json`.
-6. Open the extension options and set the pi-web-ui service URL. Localhost is pre-authorized; remote and HTTPS origins require an explicit browser permission grant.
+3. In Chrome or Edge, open `chrome://extensions` or `edge://extensions`, enable **Developer mode**, choose **Load unpacked**, and select the extracted directory containing `manifest.json`.
+4. In Firefox, open `about:debugging#/runtime/this-firefox`, choose **This Firefox**, click **Load Temporary Add-on**, and select the extracted `manifest.json`.
+5. Open the extension options and set the pi-web-ui service URL. Localhost is pre-authorized; remote and HTTPS origins require an explicit browser permission grant.
+
+The shared manifest uses a service worker in Chromium and a module background script in Firefox. This build targets Chrome/Edge 121+ and Firefox 128+ because it injects trusted page functions with the `MAIN` execution world.
 
 The extension targets the browser tab running pi-web-ui. Keep that tab open when sending a pick or when using AI page control.
 
@@ -38,7 +39,7 @@ npm run pack:extension
 
 `build:extension` writes the five MV3 entry points to `extension/dist/`. `pack:extension` creates `release/page-picker-extension-<version>.zip` and the stable `release/page-picker-extension.zip` alias. The packer checks the required ZIP entries before writing them.
 
-To load a local build, choose `plugins/page-picker/extension/` in **Load unpacked** after building. Refresh the extension after rebuilding.
+To load a local build, choose `plugins/page-picker/extension/` in **Load unpacked** after building. In Firefox, select its `manifest.json` from **Load Temporary Add-on**. Refresh or reload the extension after rebuilding.
 
 ## Usage
 
@@ -51,7 +52,7 @@ If the pi-web-ui page or composer is unavailable, the extension copies Markdown 
 
 ## Compatibility
 
-The extension uses `window.__piWebUiHost.compose()` from the pi-web-ui host bridge when available. Older pi-web-ui versions receive a clear compatibility message and use the clipboard fallback. AI page control requires a pi-web-ui version exposing the corresponding page-call bridge.
+The extension uses `window.__piWebUiHost.compose()` from the pi-web-ui host bridge when available. Older pi-web-ui versions receive a clear compatibility message and use the clipboard fallback. AI page control requires a pi-web-ui version exposing the corresponding page-call bridge. A small shim aliases Firefox's `browser.*` namespace when its Chrome-shaped namespace is unavailable; Chromium continues to use the same bundled code.
 
 ## License
 

@@ -25,7 +25,7 @@ plugin-marketplace list, so the two must not drift.
 
 ## Browser extension
 
-`plugins/page-picker/extension/` is the standalone **pi-web-ui Page Picker** Chrome/Edge extension. It is not a
+`plugins/page-picker/extension/` is the standalone **pi-web-ui Page Picker** Chrome/Edge/Firefox extension. It is not a
 pi-web-ui plugin and is intentionally absent from the catalog. It picks development-page elements, sends focused
 context to the composer, and optionally provides AI page control and an explicit page bridge.
 
@@ -34,7 +34,7 @@ npm run build:extension
 npm run pack:extension
 ```
 
-Load `plugins/page-picker/extension/` as an unpacked extension after building, or install
+Load `plugins/page-picker/extension/` as an unpacked extension after building (or as a temporary add-on in Firefox), or install
 `release/page-picker-extension.zip` from a tagged release. See
 [`plugins/page-picker/README.md`](plugins/page-picker/README.md) for the full setup and permission model.
 

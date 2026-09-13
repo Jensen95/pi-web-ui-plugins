@@ -1,4 +1,5 @@
 import "../chrome.d.ts";
+import "../compat.js";
 
 import {
 	normalizeAiPages,

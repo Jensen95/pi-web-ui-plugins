@@ -1,4 +1,5 @@
 import "../chrome.d.ts";
+import "../compat.js";
 /// <reference lib="dom" />
 
 import { bindView, type BindResult, type BindView } from "../shared/bind.js";
