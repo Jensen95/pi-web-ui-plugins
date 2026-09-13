@@ -22,19 +22,46 @@ These are English-only TypeScript ports of the upstream plugins. See
 `plugins/catalog.json` is the machine-readable form of this table. pi-web-ui reads it as its built-in
 plugin-marketplace list, so the two must not drift.
 
-## Installing a plugin
+## Installing plugins
 
-Compiled runtime entries are intentionally tracked so the normal GitHub install works directly:
+Compiled runtime entries are intentionally tracked, so the normal GitHub install works directly without
+downloading an archive or running a build. Install one plugin with its repository subdirectory:
 
 ```sh
+pi-web-ui install Jensen95/pi-web-ui-plugins/plugins/db-client
 pi-web-ui install Jensen95/pi-web-ui-plugins/plugins/image-toolkit
+pi-web-ui install Jensen95/pi-web-ui-plugins/plugins/mcp-manager
+pi-web-ui install Jensen95/pi-web-ui-plugins/plugins/mermaid
+pi-web-ui install Jensen95/pi-web-ui-plugins/plugins/run-trace
+pi-web-ui install Jensen95/pi-web-ui-plugins/plugins/vscode-editor
+pi-web-ui install Jensen95/pi-web-ui-plugins/plugins/webmail
 ```
 
-Use the same form for any plugin in `plugins/`. The image-toolkit directory includes its server entry,
-client entry, core modules, and browser modules. Runtime packages for plugins that need them are installed
-by pi-web-ui on first activation via `ensureDeps`.
+To install every plugin in the catalog at once:
 
-The release workflow remains available for tagged archives, but a release is not required for installation.
+```sh
+curl -fsSL https://raw.githubusercontent.com/Jensen95/pi-web-ui-plugins/main/plugins/catalog.json |
+ jq -r '.[].source' |
+ while IFS= read -r source; do pi-web-ui install "$source"; done
+```
+
+### Custom catalogs
+
+Recent pi-web-ui versions support custom catalog entries. Open **Settings → UI plugins → Plugin marketplace →
+Add plugin** and enter a source such as `Jensen95/pi-web-ui-plugins/plugins/image-toolkit`. Entries are stored
+in `~/.pi-web/plugin-catalog.json` (or `<dataDir>/plugin-catalog.json`) and appear alongside the built-in catalog.
+
+To load this repository's complete catalog as a custom catalog:
+
+```sh
+mkdir -p ~/.pi-web
+curl -fsSL https://raw.githubusercontent.com/Jensen95/pi-web-ui-plugins/main/plugins/catalog.json |
+ jq '{entries: .}' > ~/.pi-web/plugin-catalog.json
+```
+
+Refresh pi-web-ui after writing the file. The release workflow remains available for tagged archives, but a
+release is not required for installation. Runtime packages for plugins that need them are installed by pi-web-ui
+on first activation via `ensureDeps`.
 
 ## Development
 
@@ -81,14 +108,13 @@ plugins/<id>/
     index.ts           committed  - server entry source (only if it has server logic)
     client.ts          committed  - browser view or renderer source
     <anything>.ts      committed  - helper modules, inlined by the build
-  index.mjs            GENERATED  - gitignored, from src/index.ts
-  client/entry.mjs     GENERATED  - gitignored, from src/client.ts
-  client/vendor/*      GENERATED  - gitignored, third-party bundles
+  index.mjs            GENERATED  - tracked, from src/index.ts
+  client/entry.mjs     GENERATED  - tracked, from src/client.ts
+  client/vendor/*      GENERATED  - tracked, third-party bundles
 ```
 
-The generated entries for most plugins are ignored and rebuilt in CI. `image-toolkit` is the intentional
-exception: its runnable entries and browser/core modules are tracked so a GitHub subdirectory install works
-without downloading an archive or running a build. Its TypeScript sources remain the source for regeneration.
+All runnable entries and required browser/vendor modules are tracked so every GitHub subdirectory install works
+without downloading an archive or running a build. The TypeScript sources remain the source for regeneration.
 
 `scripts/build-plugins.mjs` is convention-driven: one shared builder walks `plugins/*/`, and there are no
 per-plugin build files or `package.json` files. Server bundles keep npm specifiers external
@@ -106,10 +132,9 @@ between them by locale. Here English lives in `description` and no `descriptionE
 The rule is enforced twice, in CI, on every push:
 
 - `npm run check:english` (`scripts/check-english.mjs`) exits non-zero and prints `path:line:col` for any
-  character in `[\u3000-\u303f\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uff00-\uffef]`. It scans every file
-  git tracks or would track, and separately scans the compiled plugin entries - which are gitignored, so a
-  stale artifact left behind by an interrupted build would otherwise be invisible and still be loaded by the
-  host. Third-party output under `client/vendor/` is the only exclusion.
+  character in `[\u3000-\u303f\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uff00-\uffef]`. It scans every file git
+  tracks or would track, including compiled plugin entries. Third-party output under `client/vendor/` is the
+  only exclusion.
 - `tests/unit/english-only.test.ts` asserts the same invariant inside the test suite.
 
 The class deliberately excludes U+2018-U+201F: those are legitimate English smart quotes. The one carve-out

@@ -346,18 +346,11 @@ describe("TypeScript layout", () => {
 		expect(obsolete, `dependencies live in the root package.json:\n${obsolete.join("\n")}`).toEqual([]);
 	});
 
-	it("tracks runnable image-toolkit artifacts and ignores other generated output", () => {
+	it("tracks every generated asset required by direct installs", () => {
 		const tracked = gitFilesCached();
-		expect(tracked).toContain("plugins/image-toolkit/index.mjs");
-		expect(tracked).toContain("plugins/image-toolkit/client/entry.mjs");
-		const generated = filesUnder("plugins").filter((file) =>
-			/^plugins\/[^/]+\/(index\.mjs|client\/)|^dist\//.test(file),
-		);
-		const untrackedGenerated = generated.filter((file) => !tracked.includes(file) && !isGitIgnored(file));
-		expect(
-			untrackedGenerated,
-			`generated output is neither tracked nor ignored:\n${untrackedGenerated.join("\n")}`,
-		).toEqual([]);
+		const generated = filesUnder("plugins").filter((file) => /^plugins\/[^/]+\/(index\.mjs|client\/)/.test(file));
+		const unavailable = generated.filter((file) => !tracked.includes(file) || isGitIgnored(file));
+		expect(unavailable, `generated output is not directly installable:\n${unavailable.join("\n")}`).toEqual([]);
 	});
 });
 
@@ -378,9 +371,11 @@ describe("compiled artifacts", () => {
 		expect(problems, `build output missing (npm run build):\n${problems.join("\n")}`).toEqual([]);
 	});
 
-	it("keeps tracked image-toolkit artifacts available to direct installs", () => {
-		expect(isGitIgnored("plugins/image-toolkit/index.mjs")).toBe(false);
-		expect(isGitIgnored("plugins/image-toolkit/client/entry.mjs")).toBe(false);
+	it("keeps every compiled entry available to direct installs", () => {
+		for (const [id, expected] of Object.entries(EXPECTED_ARTIFACTS)) {
+			if (expected.server) expect(isGitIgnored(`plugins/${id}/index.mjs`)).toBe(false);
+			if (expected.client) expect(isGitIgnored(`plugins/${id}/client/entry.mjs`)).toBe(false);
+		}
 	});
 
 	it("are regenerable from committed sources alone", () => {
@@ -394,7 +389,9 @@ describe("compiled artifacts", () => {
 				problems.push(`${artifact} exists but its source ${source} does not`);
 				return;
 			}
-			if (isGitIgnored(source)) problems.push(`${source} is gitignored, so ${artifact} cannot be rebuilt from a clone`);
+			if (isGitIgnored(source)) {
+				problems.push(`${source} is gitignored, so ${artifact} cannot be rebuilt from a clone`);
+			}
 		};
 		for (const id of pluginIds()) {
 			check(`plugins/${id}/src/index.ts`, `plugins/${id}/index.mjs`);

@@ -98,7 +98,7 @@ function withTempDir<T>(run: (dir: string) => T): T {
 }
 
 describe("plugin skeleton", () => {
-	it("contains exactly the six expected plugin directories", () => {
+	it("contains exactly the seven expected plugin directories", () => {
 		expect(pluginIds()).toEqual(EXPECTED_PLUGIN_IDS);
 	});
 
@@ -215,10 +215,8 @@ describe("obsolete per-plugin build machinery", () => {
 		const pkg = readPackageJson();
 		expect(pkg.scripts.clean).toBe("node scripts/clean.mjs");
 		expect(pkg.scripts["clean:force"]).toBe("node scripts/clean.mjs --force");
-		// The compiled entries are gitignored, so while a plugin is still un-ported the
-		// hand-written upstream .mjs at those paths is the porting agent's only copy of
-		// the source. clean.mjs refuses to delete an artifact that has no src/*.ts to
-		// rebuild it from; this asserts the guard is what the script implements.
+		// clean.mjs refuses to delete an artifact that has no src/*.ts to rebuild it
+		// from; this asserts the guard is what the script implements.
 		const source = readFileSync(repoPath("scripts", "clean.mjs"), "utf8");
 		expect(source).toContain("--force");
 		expect(source).toContain("src/index.ts");
@@ -281,16 +279,12 @@ describe("English-only gate", () => {
 });
 
 describe("gitignore boundary", () => {
-	it("ignores every path the builder writes", () => {
+	it("keeps runnable plugin artifacts trackable", () => {
 		for (const id of EXPECTED_PLUGIN_IDS) {
 			const { server, client } = artifactRelPaths(id);
-			const trackedInstallArtifact = id === "image-toolkit";
-			expect(isGitIgnored(server), `${server} ignore policy`).toBe(!trackedInstallArtifact);
-			expect(isGitIgnored(client), `${client} ignore policy`).toBe(!trackedInstallArtifact);
-			expect(
-				isGitIgnored(`plugins/${id}/client/vendor/anything.bundle.mjs`),
-				`${id} vendor output must be gitignored`,
-			).toBe(true);
+			expect(isGitIgnored(server), `${server} must be installable from GitHub`).toBe(false);
+			expect(isGitIgnored(client), `${client} must be installable from GitHub`).toBe(false);
+			expect(isGitIgnored(`plugins/${id}/client/vendor/anything.bundle.mjs`)).toBe(false);
 			expect(isGitIgnored(`plugins/${id}/node_modules/x/index.js`), `${id} node_modules`).toBe(true);
 			expect(isGitIgnored(`plugins/${id}/storage/state.json`), `${id} runtime storage`).toBe(true);
 		}

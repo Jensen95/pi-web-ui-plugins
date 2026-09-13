@@ -20,14 +20,6 @@ plugins/*/storage/
 # ---------------------------------------------------------------------------
 # Generated plugin artifacts.
 #
-# Most plugin entries are rebuilt in CI and remain ignored. image-toolkit is the
-# repo-local install exception: its runnable entries and runtime modules are
-# intentionally tracked so GitHub subdirectory installs work without a build.
+# Compiled entries and vendored browser assets are tracked because the normal
+# GitHub subdirectory installer needs a runnable plugin without a local build.
 # ---------------------------------------------------------------------------
-plugins/*/index.mjs
-plugins/*/client/entry.mjs
-plugins/*/client/vendor/
-!plugins/image-toolkit/index.mjs
-!plugins/image-toolkit/client/
-!plugins/image-toolkit/client/entry.mjs
-!plugins/image-toolkit/client/*.mjs

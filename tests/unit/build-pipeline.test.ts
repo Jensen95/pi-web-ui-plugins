@@ -137,17 +137,15 @@ describe("full build run", () => {
 		}
 	});
 
-	it("writes nothing that git would commit", () => {
-		runFullBuild();
-		// The whole point of gitignoring the artifacts: a build must never dirty the
-		// tracked tree, and every path it creates must be ignored.
-		const generated = gitStatusPaths().filter(
-			(path) =>
-				/^plugins\/(?!image-toolkit\/)[^/]+\/index\.mjs$/.test(path) ||
-				/^plugins\/(?!image-toolkit\/)[^/]+\/client\/entry\.mjs$/.test(path) ||
-				/^plugins\/[^/]+\/client\/vendor\//.test(path),
-		);
-		expect(generated, `generated artifacts are not gitignored`).toEqual([]);
+	it("rebuilds committed artifacts without dirtying the checkout", () => {
+		const isGenerated = (path: string) =>
+			/^plugins\/[^/]+\/index\.mjs$/.test(path) ||
+			/^plugins\/[^/]+\/client\/entry\.mjs$/.test(path) ||
+			/^plugins\/[^/]+\/client\/vendor\//.test(path);
+		const before = gitStatusPaths().filter(isGenerated);
+		const run = runFullBuild();
+		expect(run.status, `build failed:\n${run.stderr}\n${run.stdout}`).toBe(0);
+		expect(gitStatusPaths().filter(isGenerated), `committed artifacts changed during a rebuild`).toEqual(before);
 	});
 });
 
@@ -165,10 +163,9 @@ describe("per-plugin build", () => {
 			if (other.dirName === target.dirName) continue;
 			expect(result.stdout, `single-plugin build touched ${other.dirName}`).not.toContain(`${other.dirName}:`);
 		}
-		// Every artifact it reports is a gitignored generated path.
+		// Every artifact it reports is part of the direct-install payload.
 		for (const artifact of result.artifacts) {
-			const trackedInstallArtifact = artifact.startsWith("plugins/image-toolkit/");
-			expect(isGitIgnored(artifact), `${artifact} ignore policy`).toBe(!trackedInstallArtifact);
+			expect(isGitIgnored(artifact), `${artifact} must be trackable for direct installs`).toBe(false);
 		}
 	});
 
@@ -177,11 +174,10 @@ describe("per-plugin build", () => {
 			const { server, client } = artifactRelPaths(plugin.dirName);
 			expect(server).toBe(`plugins/${plugin.dirName}/index.mjs`);
 			expect(client).toBe(`plugins/${plugin.dirName}/client/entry.mjs`);
-			// Those are exactly the filenames the host hardcodes, so they are also
-			// image-toolkit is the tracked direct-install exception.
-			const trackedInstallArtifact = plugin.dirName === "image-toolkit";
-			expect(isGitIgnored(server)).toBe(!trackedInstallArtifact);
-			expect(isGitIgnored(client)).toBe(!trackedInstallArtifact);
+			// Those are exactly the filenames the host hardcodes, so every plugin's
+			// direct-install payload must keep them trackable.
+			expect(isGitIgnored(server)).toBe(false);
+			expect(isGitIgnored(client)).toBe(false);
 		}
 	});
 
@@ -214,7 +210,7 @@ describe("per-plugin build", () => {
 			// The host hardcodes these filenames, so a rebuild must not move them.
 			expect(second.artifacts).toEqual(paths);
 			for (const artifact of paths) {
-				expect(isGitIgnored(artifact), `${artifact} must be gitignored`).toBe(true);
+				expect(isGitIgnored(artifact), `${artifact} must be trackable for direct installs`).toBe(false);
 			}
 		},
 	);

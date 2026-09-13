@@ -6,8 +6,9 @@
  * messages, JSON, YAML, README, workflows, build scripts and the compiled output
  * those produce.
  *
- * Two passes, because the compiled entries are gitignored and a stale artifact
- * left behind by an interrupted conversion would otherwise be invisible:
+ * Two passes keep the compiled-entry check explicit even though those files are
+ * tracked: the repo-wide pass and the compiled-entry pass have different CJK
+ * policies for bundled browser dependencies.
  *   1. every file git tracks or would track (repoFiles)
  *   2. every compiled plugin entry that exists (listCompiledEntries)
  * Third-party vendor output is the only exclusion.
@@ -73,16 +74,13 @@ describe("English-only invariant", () => {
 		expect(isVendorPath("plugins/mermaid/manifest.json")).toBe(false);
 	});
 
-	it("excludes the compiled entries from the tracked-file pass, so pass 2 is what covers them", () => {
+	it("includes every compiled entry in the tracked-file pass", () => {
 		const built = listCompiledEntries();
 		const tracked = repoFiles();
-		// Both lists are only meaningful if they stay disjoint: an entry appearing in
-		// neither pass would be scanned by nothing at all.
+		expect(built.length).toBeGreaterThan(0);
 		for (const entry of built) {
-			const trackedInstallArtifact = entry.startsWith("plugins/image-toolkit/");
-			expect(isGitIgnored(entry), `${entry} ignore policy`).toBe(!trackedInstallArtifact);
-			if (trackedInstallArtifact) expect(tracked).toContain(entry);
-			else expect(tracked).not.toContain(entry);
+			expect(isGitIgnored(entry), `${entry} must be trackable`).toBe(false);
+			expect(tracked, `${entry} is absent from the repo file pass`).toContain(entry);
 		}
 	});
 

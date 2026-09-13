@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 /**
- * Remove ignored generated artifacts. image-toolkit runtime entries are tracked
- * for direct GitHub installs and are intentionally preserved.
+ * Remove generated artifacts.
  *
  * Safety guard. An artifact whose src/*.ts does not exist yet cannot be rebuilt.
  * While plugins are still being ported from upstream, the hand-written .mjs
@@ -38,7 +37,6 @@ const pluginDirs = existsSync(PLUGINS_DIR) ? readdirSync(PLUGINS_DIR).sort() : [
 
 for (const id of pluginDirs) {
 	const dir = join(PLUGINS_DIR, id);
-	if (id === "image-toolkit") continue;
 
 	for (const entry of ENTRIES) {
 		const artifact = join(dir, entry.artifact);
