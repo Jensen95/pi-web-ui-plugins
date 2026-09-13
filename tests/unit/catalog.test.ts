@@ -16,8 +16,16 @@ import { findCjk, formatCjkHits, repoPath } from "../helpers/repo-files";
 
 const CATALOG_REL = "plugins/catalog.json";
 
-/** The six plugins this repo ships. legado-web and demo-mailbox are not ported. */
-const EXPECTED_IDS = ["db-client", "mcp-manager", "mermaid", "run-trace", "vscode-editor", "webmail"].sort();
+/** The seven plugins this repo ships. legado-web and demo-mailbox are not ported. */
+const EXPECTED_IDS = [
+	"db-client",
+	"image-toolkit",
+	"mcp-manager",
+	"mermaid",
+	"run-trace",
+	"vscode-editor",
+	"webmail",
+].sort();
 
 /** Where every entry must point: this repo, not upstream. */
 const REPO_SLUG = "Jensen95/pi-web-ui-plugins";

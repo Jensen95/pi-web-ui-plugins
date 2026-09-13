@@ -1,0 +1,656 @@
+/**
+ * image-toolkit  JS node
+ *
+ *  RGBA8data  width*height*4
+ *  ops.mjs
+ *
+ *
+ *   - PNG bitDepth 1/2/4/8/16 × colorType 0/2/3/4/6 filter
+ *      + tRNS **interlace=1**Adam7
+ *      🖼  8  alpha → colorType 6 colorType 2
+ *      filter
+ *   - BMP 24/32  BI_RGB + 8 bottom-upheight  = top-down 4
+ *      24  alpha/32  alphabottom-up1/4 RLE
+ *   - JPEG** import ** host.ensureDeps  jpeg-js
+ *     setJpegCodec  decode/encode  “JPEG”
+ *   - GIF/WEBP/AVIF/SVG 🖼
+ */
+
+import { Buffer } from "node:buffer";
+import { deflateSync, inflateSync } from "node:zlib";
+
+/** @typedef {{ width: number, height: number, data: Uint8Array, hasAlpha: boolean, format: string }} RgbaImage */
+
+// ---------------------------------------------------------------------------
+//
+// ---------------------------------------------------------------------------
+
+const PNG_SIG = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+
+/** × 64M ≈256MB RGBA */
+const DEFAULT_MAX_PIXELS = 64_000_000;
+
+const MIME_BY_FORMAT = {
+	png: "image/png",
+	jpeg: "image/jpeg",
+	gif: "image/gif",
+	webp: "image/webp",
+	bmp: "image/bmp",
+	avif: "image/avif",
+	svg: "image/svg+xml",
+};
+
+const FORMAT_LABEL = {
+	png: "PNG",
+	jpeg: "JPEG",
+	gif: "GIF",
+	webp: "WEBP",
+	bmp: "BMP",
+	avif: "AVIF",
+	svg: "SVG",
+	unknown: "",
+};
+
+function asBytes(buf) {
+	if (Buffer.isBuffer(buf)) return buf;
+	if (buf instanceof Uint8Array) return Buffer.from(buf.buffer, buf.byteOffset, buf.byteLength);
+	if (buf instanceof ArrayBuffer) return Buffer.from(buf);
+	throw new Error(" Buffer / Uint8Array");
+}
+
+function assertSize(width, height, maxPixels) {
+	if (!Number.isInteger(width) || width <= 0) throw new Error("");
+	if (!Number.isInteger(height) || height <= 0) throw new Error("");
+	if (width * height > maxPixels) {
+		throw new Error(`${width}×${height} = ${(width * height) / 1e6}M  ${maxPixels / 1e6}M `);
+	}
+}
+
+/**  RgbaImage  */
+function assertImage(img) {
+	if (!img || typeof img !== "object") throw new Error("");
+	assertSize(img.width, img.height, Number.MAX_SAFE_INTEGER);
+	if (!(img.data instanceof Uint8Array) && !(img.data instanceof Uint8ClampedArray)) {
+		throw new Error(" Uint8ArrayRGBA8");
+	}
+	if (img.data.length !== img.width * img.height * 4) {
+		throw new Error(` ${img.data.length}  ${img.width}×${img.height} `);
+	}
+}
+
+// ---------------------------------------------------------------------------
+//  / MIME
+// ---------------------------------------------------------------------------
+
+/**  2KB  <svg> SVG  */
+function looksLikeSvg(buf) {
+	const head = buf
+		.subarray(0, 2048)
+		.toString("latin1")
+		.replace(/^\uFEFF/, "")
+		.trimStart();
+	if (!head.startsWith("<")) return false;
+	if (/^<svg[\s/>]/i.test(head)) return true;
+	// //DOCTYPE 2KB  <svg
+	return /^<(\?xml|!--|!DOCTYPE)/i.test(head) && /<svg[\s/>]/i.test(head);
+}
+
+/**
+ *  "png" | "jpeg" | "gif" | "webp" | "bmp" | "avif" | "svg" | "unknown"
+ * /
+ */
+export function sniffFormat(buf) {
+	let b;
+	try {
+		b = asBytes(buf);
+	} catch {
+		return "unknown";
+	}
+	if (b.length >= 8) {
+		let png = true;
+		for (let i = 0; i < 8; i++) {
+			if (b[i] !== PNG_SIG[i]) {
+				png = false;
+				break;
+			}
+		}
+		if (png) return "png";
+	}
+	if (b.length >= 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return "jpeg";
+	if (b.length >= 6) {
+		const magic6 = b.toString("latin1", 0, 6);
+		if (magic6 === "GIF87a" || magic6 === "GIF89a") return "gif";
+	}
+	if (b.length >= 12 && b.toString("latin1", 0, 4) === "RIFF" && b.toString("latin1", 8, 12) === "WEBP") return "webp";
+	if (b.length >= 2 && b[0] === 0x42 && b[1] === 0x4d) return "bmp";
+	if (b.length >= 12 && b.toString("latin1", 4, 8) === "ftyp") {
+		const major = b.toString("latin1", 8, 12);
+		if (major === "avif" || major === "avis") return "avif";
+		//  minor version
+		const size = b.readUInt32BE(0);
+		if (size >= 16 && size <= 4096 && b.length >= size) {
+			const brands = b.toString("latin1", 8, Math.min(b.length, size));
+			if (brands.includes("avif") || brands.includes("avis")) return "avif";
+		}
+	}
+	if (looksLikeSvg(b)) return "svg";
+	return "unknown";
+}
+
+/**  → MIME application/octet-stream */
+export function mimeForFormat(format) {
+	return MIME_BY_FORMAT[String(format ?? "").toLowerCase()] ?? "application/octet-stream";
+}
+
+const VIEW_HINT = " 🖼 ";
+
+function unsupportedDecode(format) {
+	const label = FORMAT_LABEL[format] ?? format;
+	return new Error(`${label} ${VIEW_HINT}`);
+}
+
+// ---------------------------------------------------------------------------
+// JPEG
+// ---------------------------------------------------------------------------
+
+let jpegCodec = null;
+
+/**
+ *  JPEG  jpeg-js
+ * codec  npm  jpeg-js
+ *   { decode(buf, opts?): { width, height, data }, encode({ data, width, height }, quality): { data } }
+ */
+export function setJpegCodec(codec) {
+	if (codec == null) {
+		jpegCodec = null;
+		return;
+	}
+	if (typeof codec.decode !== "function" || typeof codec.encode !== "function") {
+		throw new Error("JPEG  decode  encode ");
+	}
+	jpegCodec = codec;
+}
+
+export function hasJpegCodec() {
+	return jpegCodec != null;
+}
+
+function requireJpegCodec() {
+	if (!jpegCodec) {
+		throw new Error(`JPEG  jpeg-js${VIEW_HINT}`);
+	}
+	return jpegCodec;
+}
+
+/**
+ *  JPEG / maxPixels
+ *  marker SOFn  precision/height/width
+ */
+function jpegHeaderInfo(buf) {
+	let pos = 2;
+	while (pos + 4 <= buf.length) {
+		if (buf[pos] !== 0xff) {
+			pos++;
+			continue;
+		}
+		const marker = buf[pos + 1];
+		if (marker === 0xff) {
+			pos++;
+			continue;
+		}
+		if (marker === 0xd8 || (marker >= 0xd0 && marker <= 0xd9) || marker === 0x01) {
+			pos += 2;
+			continue;
+		}
+		if (marker === 0xda) break; //  SOF
+		const len = buf.readUInt16BE(pos + 2);
+		if (len < 2) break;
+		// SOF0..SOF15 DHT(C4)/JPG(C8)/DAC(CC)
+		if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
+			if (pos + 9 <= buf.length) {
+				return { bitDepth: buf[pos + 4], height: buf.readUInt16BE(pos + 5), width: buf.readUInt16BE(pos + 7) };
+			}
+			return null;
+		}
+		pos += 2 + len;
+	}
+	return null;
+}
+
+// ---------------------------------------------------------------------------
+// PNG
+// ---------------------------------------------------------------------------
+
+/**  PNG  { ihdr, palette, trns, idat } */
+function parsePng(buf) {
+	if (buf.length < 8) throw new Error("PNG ");
+	for (let i = 0; i < 8; i++) {
+		if (buf[i] !== PNG_SIG[i]) throw new Error(" PNG ");
+	}
+	const out = { ihdr: null, palette: null, trns: null, idat: [] };
+	let pos = 8;
+	while (pos + 8 <= buf.length) {
+		const len = buf.readUInt32BE(pos);
+		const type = buf.toString("latin1", pos + 4, pos + 8);
+		const start = pos + 8;
+		if (start + len + 4 > buf.length) throw new Error(`PNG  ${type} `);
+		if (type === "IHDR") out.ihdr = buf.subarray(start, start + len);
+		else if (type === "PLTE") out.palette = buf.subarray(start, start + len);
+		else if (type === "tRNS") out.trns = buf.subarray(start, start + len);
+		else if (type === "IDAT") out.idat.push(buf.subarray(start, start + len));
+		else if (type === "IEND") break;
+		pos = start + len + 4;
+	}
+	if (!out.ihdr || out.ihdr.length < 13) throw new Error("PNG  IHDR ");
+	return out;
+}
+
+/** Paeth PNG filter 4 */
+function paeth(a, b, c) {
+	const p = a + b - c;
+	const pa = Math.abs(p - a);
+	const pb = Math.abs(p - b);
+	const pc = Math.abs(p - c);
+	if (pa <= pb && pa <= pc) return a;
+	if (pb <= pc) return b;
+	return c;
+}
+
+/**
+ *  filter filter  0
+ * bpp = bitDepth<8  1  PNG
+ */
+function unfilter(raw, rowBytes, height, bpp) {
+	const out = Buffer.alloc(rowBytes * height);
+	let pos = 0;
+	for (let y = 0; y < height; y++) {
+		const ft = raw[pos++];
+		const cur = out.subarray(y * rowBytes, (y + 1) * rowBytes);
+		const prev = y > 0 ? out.subarray((y - 1) * rowBytes, y * rowBytes) : null;
+		raw.copy(cur, 0, pos, pos + rowBytes);
+		pos += rowBytes;
+		switch (ft) {
+			case 0:
+				break;
+			case 1:
+				for (let i = bpp; i < rowBytes; i++) cur[i] = (cur[i] + cur[i - bpp]) & 0xff;
+				break;
+			case 2:
+				if (prev) for (let i = 0; i < rowBytes; i++) cur[i] = (cur[i] + prev[i]) & 0xff;
+				break;
+			case 3:
+				for (let i = 0; i < rowBytes; i++) {
+					const a = i >= bpp ? cur[i - bpp] : 0;
+					const b = prev ? prev[i] : 0;
+					cur[i] = (cur[i] + ((a + b) >> 1)) & 0xff;
+				}
+				break;
+			case 4:
+				for (let i = 0; i < rowBytes; i++) {
+					const a = i >= bpp ? cur[i - bpp] : 0;
+					const b = prev ? prev[i] : 0;
+					const c = prev && i >= bpp ? prev[i - bpp] : 0;
+					cur[i] = (cur[i] + paeth(a, b, c)) & 0xff;
+				}
+				break;
+			default:
+				throw new Error(`PNG  filter  ${ft}`);
+		}
+	}
+	return out;
+}
+
+/**  ch  x  1/2/4/8/16  */
+function sampleAt(raw, rowStart, x, ch, bitDepth, channels) {
+	const bitOffset = (x * channels + ch) * bitDepth;
+	const bytePos = rowStart + (bitOffset >> 3);
+	if (bitDepth === 8) return raw[bytePos];
+	if (bitDepth === 16) return (raw[bytePos] << 8) | raw[bytePos + 1];
+	const shift = 8 - bitDepth - (bitOffset & 7);
+	return (raw[bytePos] >> shift) & ((1 << bitDepth) - 1);
+}
+
+/**  RGBA8 0..25516  */
+function expandToRgba(raw, width, height, bitDepth, colorType, palette, trns) {
+	const out = new Uint8Array(width * height * 4);
+	const channels = colorType === 2 ? 3 : colorType === 4 ? 2 : colorType === 6 ? 4 : 1;
+	const bitsPerPixel = channels * bitDepth;
+	const rowBytes = Math.ceil((width * bitsPerPixel) / 8);
+	const maxVal = (1 << bitDepth) - 1;
+	const to8 = bitDepth === 8 ? (v) => v : (v) => Math.round((v * 255) / maxVal);
+	for (let y = 0; y < height; y++) {
+		const rowStart = y * rowBytes;
+		for (let x = 0; x < width; x++) {
+			const o = (y * width + x) * 4;
+			if (colorType === 3) {
+				const idx = sampleAt(raw, rowStart, x, 0, bitDepth, 1);
+				const p = idx * 3;
+				if (!palette || p + 2 >= palette.length) throw new Error(`PNG  ${idx} `);
+				out[o] = palette[p];
+				out[o + 1] = palette[p + 1];
+				out[o + 2] = palette[p + 2];
+				out[o + 3] = trns && idx < trns.length ? trns[idx] : 255;
+			} else if (colorType === 0) {
+				const g = to8(sampleAt(raw, rowStart, x, 0, bitDepth, channels));
+				out[o] = g;
+				out[o + 1] = g;
+				out[o + 2] = g;
+				out[o + 3] = 255;
+			} else if (colorType === 4) {
+				const g = to8(sampleAt(raw, rowStart, x, 0, bitDepth, channels));
+				out[o] = g;
+				out[o + 1] = g;
+				out[o + 2] = g;
+				out[o + 3] = to8(sampleAt(raw, rowStart, x, 1, bitDepth, channels));
+			} else {
+				out[o] = to8(sampleAt(raw, rowStart, x, 0, bitDepth, channels));
+				out[o + 1] = to8(sampleAt(raw, rowStart, x, 1, bitDepth, channels));
+				out[o + 2] = to8(sampleAt(raw, rowStart, x, 2, bitDepth, channels));
+				out[o + 3] = colorType === 6 ? to8(sampleAt(raw, rowStart, x, 3, bitDepth, channels)) : 255;
+			}
+		}
+	}
+	return out;
+}
+
+/**  PNG → RgbaImage */
+function decodePng(buf, maxPixels) {
+	const { ihdr, palette, trns, idat } = parsePng(buf);
+	const width = ihdr.readUInt32BE(0);
+	const height = ihdr.readUInt32BE(4);
+	const bitDepth = ihdr[8];
+	const colorType = ihdr[9];
+	const interlace = ihdr[12];
+	if (interlace === 1) throw new Error(`Adam7PNG ${VIEW_HINT}`);
+	if (![1, 2, 4, 8, 16].includes(bitDepth)) throw new Error(`PNG  ${bitDepth} `);
+	if (![0, 2, 3, 4, 6].includes(colorType)) throw new Error(`PNG  ${colorType} `);
+	if (colorType === 3 && bitDepth === 16) throw new Error("PNG  16 ");
+	assertSize(width, height, maxPixels);
+	if (colorType === 3 && !palette) throw new Error("PNG  PLTE ");
+	if (idat.length === 0) throw new Error("PNG  IDAT ");
+
+	const channels = colorType === 2 ? 3 : colorType === 4 ? 2 : colorType === 6 ? 4 : 1;
+	const bitsPerPixel = channels * bitDepth;
+	const rowBytes = Math.ceil((width * bitsPerPixel) / 8);
+	const bpp = Math.max(1, Math.ceil(bitsPerPixel / 8));
+
+	let raw;
+	try {
+		raw = inflateSync(Buffer.concat(idat));
+	} catch (err) {
+		throw new Error(`PNG ${err.message}`);
+	}
+	const need = (rowBytes + 1) * height;
+	if (raw.length < need) throw new Error(`PNG  ${need}  ${raw.length}`);
+
+	const pixels = unfilter(raw, rowBytes, height, bpp);
+	const data = expandToRgba(pixels, width, height, bitDepth, colorType, palette, trns);
+	const hasAlpha = colorType === 4 || colorType === 6 || (colorType === 3 && trns != null);
+	return { width, height, data, hasAlpha, format: "png" };
+}
+
+// ---------------------------------------------------------------------------
+// PNG
+// ---------------------------------------------------------------------------
+
+const CRC_TABLE = (() => {
+	const t = new Int32Array(256);
+	for (let n = 0; n < 256; n++) {
+		let c = n;
+		for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+		t[n] = c;
+	}
+	return t;
+})();
+
+function crc32(buf) {
+	let c = 0xffffffff;
+	for (let i = 0; i < buf.length; i++) c = CRC_TABLE[(c ^ buf[i]) & 0xff] ^ (c >>> 8);
+	return (c ^ 0xffffffff) >>> 0;
+}
+
+function pngChunk(type, data) {
+	const head = Buffer.alloc(8);
+	head.writeUInt32BE(data.length, 0);
+	head.write(type, 4, "latin1");
+	const crcBuf = Buffer.alloc(4);
+	crcBuf.writeUInt32BE(crc32(Buffer.concat([head.subarray(4), data])), 0);
+	return Buffer.concat([head, data, crcBuf]);
+}
+
+/**  PNG8 hasAlpha → colorType 6 filter */
+function encodePng(img, pngLevel) {
+	const { width, height, data } = img;
+	const ch = img.hasAlpha ? 4 : 3;
+	const colorType = img.hasAlpha ? 6 : 2;
+	const rowBytes = width * ch;
+	const raw = Buffer.alloc((rowBytes + 1) * height);
+	const cur = new Uint8Array(rowBytes);
+	const prev = new Uint8Array(rowBytes);
+	const cands = [0, 1, 2, 3, 4].map(() => new Uint8Array(rowBytes));
+	let pos = 0;
+	for (let y = 0; y < height; y++) {
+		for (let x = 0; x < width; x++) {
+			const s = (y * width + x) * 4;
+			const d = x * ch;
+			cur[d] = data[s];
+			cur[d + 1] = data[s + 1];
+			cur[d + 2] = data[s + 2];
+			if (ch === 4) cur[d + 3] = data[s + 3];
+		}
+		let best = 0;
+		let bestScore = Infinity;
+		for (let f = 0; f < 5; f++) {
+			const out = cands[f];
+			for (let i = 0; i < rowBytes; i++) {
+				const a = i >= ch ? cur[i - ch] : 0;
+				const b = prev[i];
+				const c = i >= ch ? prev[i - ch] : 0;
+				let v;
+				if (f === 0) v = cur[i];
+				else if (f === 1) v = cur[i] - a;
+				else if (f === 2) v = cur[i] - b;
+				else if (f === 3) v = cur[i] - ((a + b) >> 1);
+				else v = cur[i] - paeth(a, b, c);
+				out[i] = v & 0xff;
+			}
+			//
+			let score = 0;
+			for (let i = 0; i < rowBytes; i++) score += out[i] < 128 ? out[i] : 256 - out[i];
+			if (score < bestScore) {
+				bestScore = score;
+				best = f;
+			}
+		}
+		raw[pos++] = best;
+		raw.set(cands[best], pos);
+		pos += rowBytes;
+		prev.set(cur);
+	}
+
+	const ihdr = Buffer.alloc(13);
+	ihdr.writeUInt32BE(width, 0);
+	ihdr.writeUInt32BE(height, 4);
+	ihdr[8] = 8;
+	ihdr[9] = colorType;
+	ihdr[10] = 0;
+	ihdr[11] = 0;
+	ihdr[12] = 0;
+	const idat = deflateSync(raw, { level: Math.min(9, Math.max(0, pngLevel)) });
+	return Buffer.concat([
+		Buffer.from(PNG_SIG),
+		pngChunk("IHDR", ihdr),
+		pngChunk("IDAT", idat),
+		pngChunk("IEND", Buffer.alloc(0)),
+	]);
+}
+
+// ---------------------------------------------------------------------------
+// BMP  /
+// ---------------------------------------------------------------------------
+
+/**  BMP24/32  BI_RGB8 → RgbaImage */
+function decodeBmp(buf, maxPixels) {
+	if (buf.length < 26) throw new Error("BMP ");
+	if (buf.toString("latin1", 0, 2) !== "BM") throw new Error(" BMP ");
+	const dataOffset = buf.readUInt32LE(10);
+	const dibSize = buf.readUInt32LE(14);
+	if (dibSize < 40) throw new Error(` BMP DIB  ${dibSize} BITMAPINFOHEADER `);
+	const rawHeight = buf.readInt32LE(22);
+	const width = buf.readInt32LE(18);
+	const height = Math.abs(rawHeight);
+	const topDown = rawHeight < 0;
+	const bitCount = buf.readUInt16LE(28);
+	const compression = buf.readUInt32LE(30);
+	assertSize(width, height, maxPixels);
+	if (compression !== 0) throw new Error(` BMP compression=${compression} BI_RGB`);
+	if (bitCount !== 8 && bitCount !== 24 && bitCount !== 32) {
+		throw new Error(` BMP ${bitCount}  8/24/32 `);
+	}
+
+	let palette = null;
+	if (bitCount === 8) {
+		const clrUsed = buf.readUInt32LE(46);
+		const count = clrUsed > 0 ? clrUsed : 256;
+		const pOff = 14 + dibSize;
+		if (pOff + count * 4 > buf.length) throw new Error("BMP ");
+		palette = new Uint8Array(count * 4);
+		for (let i = 0; i < count; i++) {
+			const s = pOff + i * 4;
+			palette[i * 4] = buf[s + 2];
+			palette[i * 4 + 1] = buf[s + 1];
+			palette[i * 4 + 2] = buf[s];
+			palette[i * 4 + 3] = 255;
+		}
+	}
+
+	const stride = ((width * bitCount + 31) >> 5) * 4;
+	if (dataOffset + stride * height > buf.length) throw new Error("BMP ");
+	const data = new Uint8Array(width * height * 4);
+	for (let row = 0; row < height; row++) {
+		const y = topDown ? row : height - 1 - row;
+		const src = dataOffset + row * stride;
+		for (let x = 0; x < width; x++) {
+			const o = (y * width + x) * 4;
+			if (bitCount === 8) {
+				const idx = buf[src + x];
+				const p = idx * 4;
+				data[o] = palette[p];
+				data[o + 1] = palette[p + 1];
+				data[o + 2] = palette[p + 2];
+				data[o + 3] = 255;
+			} else if (bitCount === 24) {
+				const s = src + x * 3;
+				data[o] = buf[s + 2];
+				data[o + 1] = buf[s + 1];
+				data[o + 2] = buf[s];
+				data[o + 3] = 255;
+			} else {
+				const s = src + x * 4;
+				data[o] = buf[s + 2];
+				data[o + 1] = buf[s + 1];
+				data[o + 2] = buf[s];
+				data[o + 3] = buf[s + 3];
+			}
+		}
+	}
+	// 8/24  alpha 32  BI_RGB  alpha
+	return { width, height, data, hasAlpha: bitCount === 32, format: "bmp" };
+}
+
+/**  BMPhasAlpha → 32  24 bottom-up 4  0 */
+function encodeBmp(img) {
+	const { width, height, data } = img;
+	const bitCount = img.hasAlpha ? 32 : 24;
+	const stride = ((width * bitCount + 31) >> 5) * 4;
+	const fileSize = 14 + 40 + stride * height;
+	const out = Buffer.alloc(fileSize);
+	out.write("BM", 0, "latin1");
+	out.writeUInt32LE(fileSize, 2);
+	out.writeUInt32LE(54, 10);
+	out.writeUInt32LE(40, 14);
+	out.writeInt32LE(width, 18);
+	out.writeInt32LE(height, 22);
+	out.writeUInt16LE(1, 26);
+	out.writeUInt16LE(bitCount, 28);
+	out.writeUInt32LE(0, 30);
+	out.writeUInt32LE(stride * height, 34);
+	out.writeInt32LE(2835, 38);
+	out.writeInt32LE(2835, 42);
+	for (let row = 0; row < height; row++) {
+		const y = height - 1 - row; // bottom-up
+		let p = 54 + row * stride;
+		for (let x = 0; x < width; x++) {
+			const s = (y * width + x) * 4;
+			out[p++] = data[s + 2];
+			out[p++] = data[s + 1];
+			out[p++] = data[s];
+			if (bitCount === 32) out[p++] = data[s + 3];
+		}
+	}
+	return out;
+}
+
+// ---------------------------------------------------------------------------
+//  API
+// ---------------------------------------------------------------------------
+
+/**
+ *  → RgbaImage
+ * maxPixels  64M
+ */
+export async function decodeImage(buf, opts = {}) {
+	const maxPixels = opts.maxPixels ?? DEFAULT_MAX_PIXELS;
+	if (!Number.isInteger(maxPixels) || maxPixels <= 0) throw new Error("maxPixels ");
+	const bytes = asBytes(buf);
+	if (bytes.length === 0) throw new Error("");
+	const format = sniffFormat(bytes);
+	switch (format) {
+		case "png":
+			return decodePng(bytes, maxPixels);
+		case "bmp":
+			return decodeBmp(bytes, maxPixels);
+		case "jpeg": {
+			const codec = requireJpegCodec();
+			const info = jpegHeaderInfo(bytes);
+			if (info) assertSize(info.width, info.height, maxPixels);
+			const out = codec.decode(bytes, { useTArray: true, formatAsRGBA: true });
+			if (!out || !out.width || !out.height) throw new Error("JPEG ");
+			assertSize(out.width, out.height, maxPixels);
+			const data =
+				out.data instanceof Uint8Array
+					? new Uint8Array(out.data.buffer, out.data.byteOffset, out.data.byteLength)
+					: new Uint8Array(out.data);
+			return { width: out.width, height: out.height, data, hasAlpha: false, format: "jpeg" };
+		}
+		case "unknown":
+			throw new Error(`${VIEW_HINT}`);
+		default:
+			throw unsupportedDecode(format);
+	}
+}
+
+/**
+ *  RgbaImage → Buffer
+ * format ∈ "png" | "bmp" | "jpeg"quality  jpeg 1..100 82
+ * pngLevel  zlib 0..9 9bmp  quality
+ */
+export async function encodeImage(img, format, opts = {}) {
+	assertImage(img);
+	const fmt = String(format ?? "").toLowerCase();
+	if (fmt === "png") {
+		const pngLevel = opts.pngLevel ?? 9;
+		if (!Number.isInteger(pngLevel) || pngLevel < 0 || pngLevel > 9) throw new Error("pngLevel  0..9 ");
+		return encodePng(img, pngLevel);
+	}
+	if (fmt === "bmp") return encodeBmp(img);
+	if (fmt === "jpeg" || fmt === "jpg") {
+		const codec = requireJpegCodec();
+		const quality = opts.quality ?? 82;
+		if (!Number.isFinite(quality) || quality < 1 || quality > 100) throw new Error("quality  1..100 ");
+		const out = codec.encode({ data: img.data, width: img.width, height: img.height }, Math.round(quality));
+		if (!out || !out.data) throw new Error("JPEG ");
+		return Buffer.isBuffer(out.data) ? out.data : Buffer.from(out.data);
+	}
+	throw new Error(` ${format} png / jpeg / bmp`);
+}

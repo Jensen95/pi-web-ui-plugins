@@ -1,5 +1,13 @@
 [
 	{
+		"id": "image-toolkit",
+		"name": "image-toolkit",
+		"icon": "🖼",
+		"description": "Compress, crop, resize, convert, watermark and inspect workspace images with browser Canvas processing and four AI tools.",
+		"source": "Jensen95/pi-web-ui-plugins/plugins/image-toolkit",
+		"homepage": "https://github.com/Jensen95/pi-web-ui-plugins/tree/main/plugins/image-toolkit"
+	},
+	{
 		"id": "webmail",
 		"name": "webmail",
 		"icon": "📬",

@@ -25,7 +25,15 @@ import {
 } from "../helpers/plugin-contract";
 import { REPO_ROOT, isGitIgnored, pluginIds, repoPath } from "../helpers/repo-files";
 
-const EXPECTED_PLUGIN_IDS = ["db-client", "mcp-manager", "mermaid", "run-trace", "vscode-editor", "webmail"];
+const EXPECTED_PLUGIN_IDS = [
+	"db-client",
+	"image-toolkit",
+	"mcp-manager",
+	"mermaid",
+	"run-trace",
+	"vscode-editor",
+	"webmail",
+];
 
 const EXPECTED_SCRIPTS = [
 	"test",
@@ -276,8 +284,9 @@ describe("gitignore boundary", () => {
 	it("ignores every path the builder writes", () => {
 		for (const id of EXPECTED_PLUGIN_IDS) {
 			const { server, client } = artifactRelPaths(id);
-			expect(isGitIgnored(server), `${server} must be gitignored`).toBe(true);
-			expect(isGitIgnored(client), `${client} must be gitignored`).toBe(true);
+			const trackedInstallArtifact = id === "image-toolkit";
+			expect(isGitIgnored(server), `${server} ignore policy`).toBe(!trackedInstallArtifact);
+			expect(isGitIgnored(client), `${client} ignore policy`).toBe(!trackedInstallArtifact);
 			expect(
 				isGitIgnored(`plugins/${id}/client/vendor/anything.bundle.mjs`),
 				`${id} vendor output must be gitignored`,

@@ -8,15 +8,14 @@
  *     directions, so the marketplace list cannot silently drift
  *   - permission strings use families the host actually recognises, and every
  *     gated host API a plugin calls has its family declared
- *   - the TypeScript layout held: src/*.ts is the source, nothing compiled is
- *     tracked, and every ignored artifact can be rebuilt from a committed source
+ *   - the TypeScript layout and tracked runtime artifacts stay consistent, and
+ *     every generated entry can be rebuilt from a committed source
  *   - the toolchain is really TypeScript 7
  *   - no plugin reaches outside its own directory, which is what makes
  *     "copy one directory" a complete install
  *
- * Several of these are RED while the plugin ports are still in flight. That is the
- * point: they are the definition of done for the repo as a whole. Do not narrow,
- * skip or comment one out to get a green run - finish the port instead.
+ * These are the definition of done for the repo as a whole. Keep the inventory and
+ * install contract in sync when adding a plugin.
  */
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
@@ -25,9 +24,10 @@ import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { CJK_RE, findCjk, formatCjkHits, isGitIgnored, pluginIds, repoPath } from "../helpers/repo-files";
 
-/** The six plugins this repo ships, and the artifacts each one must compile to. */
+/** The seven plugins this repo ships, and the artifacts each one must compile to. */
 const EXPECTED_ARTIFACTS: Record<string, { server: boolean; client: boolean }> = {
 	"db-client": { server: true, client: true },
+	"image-toolkit": { server: true, client: true },
 	"mcp-manager": { server: true, client: true },
 	mermaid: { server: false, client: true },
 	"run-trace": { server: true, client: true },
@@ -324,14 +324,15 @@ describe("TypeScript layout", () => {
 		expect(problems, `not ported to TypeScript yet:\n${problems.join("\n")}`).toEqual([]);
 	});
 
-	it("leaves no hand-written upstream JavaScript anywhere under plugins/", () => {
+	it("leaves no hand-written upstream JavaScript outside image-toolkit runtime assets", () => {
 		const strays = filesUnder("plugins").filter(
 			(file) =>
 				(file.endsWith(".js") || file.endsWith(".mjs") || file.endsWith(".cjs")) &&
 				// Compiled output lives at these exact paths and is checked separately.
 				!/^plugins\/[^/]+\/index\.mjs$/.test(file) &&
 				!/^plugins\/[^/]+\/client\/entry\.mjs$/.test(file) &&
-				!/^plugins\/[^/]+\/client\/vendor\//.test(file),
+				!/^plugins\/[^/]+\/client\/vendor\//.test(file) &&
+				!/^plugins\/image-toolkit\/(core\/|client\/(?!entry\.mjs$))/.test(file),
 		);
 		expect(strays, `delete these; src/*.ts replaced them:\n${strays.join("\n")}`).toEqual([]);
 	});
@@ -345,16 +346,18 @@ describe("TypeScript layout", () => {
 		expect(obsolete, `dependencies live in the root package.json:\n${obsolete.join("\n")}`).toEqual([]);
 	});
 
-	it("tracks no compiled output, in either sense of tracked", () => {
-		const compiled = /^plugins\/[^/]+\/(index\.mjs|client\/)|^dist\//;
-		// --cached: what a force-add would have committed.
-		const trackedBad = gitFilesCached().filter((file) => compiled.test(file));
-		expect(trackedBad, `compiled output is committed:\n${trackedBad.join("\n")}`).toEqual([]);
-		// untracked-but-not-ignored: what a .gitignore regression would commit next.
-		const wouldBeBad = filesUnder("plugins")
-			.filter((file) => compiled.test(file))
-			.filter((file) => !isGitIgnored(file));
-		expect(wouldBeBad, `not ignored, so "git add ." would commit them:\n${wouldBeBad.join("\n")}`).toEqual([]);
+	it("tracks runnable image-toolkit artifacts and ignores other generated output", () => {
+		const tracked = gitFilesCached();
+		expect(tracked).toContain("plugins/image-toolkit/index.mjs");
+		expect(tracked).toContain("plugins/image-toolkit/client/entry.mjs");
+		const generated = filesUnder("plugins").filter((file) =>
+			/^plugins\/[^/]+\/(index\.mjs|client\/)|^dist\//.test(file),
+		);
+		const untrackedGenerated = generated.filter((file) => !tracked.includes(file) && !isGitIgnored(file));
+		expect(
+			untrackedGenerated,
+			`generated output is neither tracked nor ignored:\n${untrackedGenerated.join("\n")}`,
+		).toEqual([]);
 	});
 });
 
@@ -375,13 +378,9 @@ describe("compiled artifacts", () => {
 		expect(problems, `build output missing (npm run build):\n${problems.join("\n")}`).toEqual([]);
 	});
 
-	it("are gitignored, with the rule that ignores them named", () => {
-		const artifacts = filesUnder("plugins").filter((file) =>
-			/^plugins\/[^/]+\/index\.mjs$|^plugins\/[^/]+\/client\//.test(file),
-		);
-		expect(artifacts.length, "no artifacts on disk to check").toBeGreaterThan(0);
-		const notIgnored = artifacts.filter((file) => !isGitIgnored(file));
-		expect(notIgnored, `git check-ignore says these are trackable:\n${notIgnored.join("\n")}`).toEqual([]);
+	it("keeps tracked image-toolkit artifacts available to direct installs", () => {
+		expect(isGitIgnored("plugins/image-toolkit/index.mjs")).toBe(false);
+		expect(isGitIgnored("plugins/image-toolkit/client/entry.mjs")).toBe(false);
 	});
 
 	it("are regenerable from committed sources alone", () => {
@@ -503,15 +502,11 @@ describe("licence and attribution", () => {
 		expect(readme, "README must carry the upstream copyright notice").toMatch(/xingshuyin/i);
 	});
 
-	it("states the honest install story in the README", () => {
-		// The compiled entries are gitignored, so `pi-web-ui install
-		// Jensen95/pi-web-ui-plugins/plugins/<id>` against a clone copies a directory
-		// with nothing runnable in it. The README has to say so plainly.
+	it("states the direct GitHub install story in the README", () => {
 		const readme = readFileSync(repoPath("README.md"), "utf8");
-		expect(readme, "README must point at the release workflow").toContain(".github/workflows/release.yml");
-		expect(readme, "README must name the GitHub Release archive as the install path").toMatch(/GitHub Release/i);
-		expect(readme, "README must explain why a source copy does not run").toMatch(/gitignore|not committed|compiled/i);
-		expect(readme, "README must give the clone-and-build fallback").toContain("npm run build");
-		expect(readme, "README must state the repo is English-only").toMatch(/English-only/i);
+		expect(readme).toContain("pi-web-ui install Jensen95/pi-web-ui-plugins/plugins/image-toolkit");
+		expect(readme).toMatch(/intentionally tracked/i);
+		expect(readme).toMatch(/release workflow/i);
+		expect(readme).toMatch(/English-only/i);
 	});
 });

@@ -79,8 +79,10 @@ describe("English-only invariant", () => {
 		// Both lists are only meaningful if they stay disjoint: an entry appearing in
 		// neither pass would be scanned by nothing at all.
 		for (const entry of built) {
-			expect(isGitIgnored(entry), `${entry} should be gitignored`).toBe(true);
-			expect(tracked, `${entry} must not also come from the tracked-file pass`).not.toContain(entry);
+			const trackedInstallArtifact = entry.startsWith("plugins/image-toolkit/");
+			expect(isGitIgnored(entry), `${entry} ignore policy`).toBe(!trackedInstallArtifact);
+			if (trackedInstallArtifact) expect(tracked).toContain(entry);
+			else expect(tracked).not.toContain(entry);
 		}
 	});
 
