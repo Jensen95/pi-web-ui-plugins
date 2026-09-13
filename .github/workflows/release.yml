@@ -23,27 +23,25 @@ jobs:
 
       - run: npm ci
 
-      # The compiled entries are gitignored, so they only exist if we build them
-      # here. An archive without them would install a plugin that cannot run.
+      # Rebuild ignored entries for most plugins and refresh the tracked image-toolkit
+      # entries. An archive without them would install a plugin that cannot run.
       - run: npm run build
 
       # Never publish an artifact this repo's own hard rule forbids.
       - run: npm run check:english
 
-      # A tag can be pushed from any commit, not just one CI already verified, and
-      # these archives are the only supported install path. The suite also holds the
-      # cross-cutting invariants (catalog matches the plugin dirs, every expected
-      # artifact exists, nothing compiled is tracked), so it gates the release.
+      # A tag can be pushed from any commit, not just one CI already verified.
+      # These archives remain a supported install path. The suite also holds the
+      # cross-cutting invariants (catalog matches the plugin dirs and every expected
+      # artifact exists), so it gates the release.
       - run: npm test
 
       # Package each plugin into an install-ready archive: manifest.json, README.md,
       # the compiled index.mjs and client/entry.mjs, and client/vendor/*. The
       # TypeScript sources under src/ and any node_modules stay out.
       #
-      # This archive is the SUPPORTED install path. Because index.mjs and
-      # client/entry.mjs are compiled and gitignored, pointing pi-web-ui at
-      # plugins/<id> in the repository would copy a directory with no runnable
-      # entry point at all.
+      # This archive is an optional install path. Most entries are rebuilt here;
+      # image-toolkit also works directly from the tracked GitHub subdirectory.
       - name: Package plugins
         run: |
           set -euo pipefail

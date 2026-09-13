@@ -9,8 +9,8 @@
  *     (the single most common workflow bug, and invisible until CI goes red)
  *   - step ORDER, because check:english also scans the compiled plugin entries,
  *     so `npm run build` must run first or half the English-only gate is unenforced
- *   - the release workflow's archive verification, since a GitHub Release archive
- *     is the ONLY supported install path for these plugins
+ *   - the release workflow's archive verification, since GitHub Release archives
+ *     remain an optional supported install path for these plugins
  *
  * YAML validity is checked by shape (required top-level keys, and the indentation
  * of every block the assertions depend on) rather than by a parser.

@@ -30,6 +30,7 @@
 		"build:mcp-manager": "node scripts/build-plugins.mjs mcp-manager",
 		"build:vscode-editor": "node scripts/build-plugins.mjs vscode-editor",
 		"build:webmail": "node scripts/build-plugins.mjs webmail",
+		"build:image-toolkit": "node scripts/build-plugins.mjs image-toolkit",
 		"clean": "node scripts/clean.mjs",
 		"clean:force": "node scripts/clean.mjs --force",
 		"check:english": "node scripts/check-english.mjs"

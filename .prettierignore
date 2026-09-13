@@ -2,6 +2,8 @@
 # ported to plugins/<id>/src/client.ts, so they are never worth reformatting.
 plugins/*/src/*.js
 
-# Generated plugin artifacts are already covered by .gitignore (prettier honours
-# it), and third-party vendor bundles must never be reformatted:
+# Generated plugin artifacts are committed for direct GitHub installs, but the
+# builder owns their formatting. Third-party vendor bundles must never be reformatted:
+plugins/*/index.mjs
+plugins/*/client/entry.mjs
 plugins/*/client/vendor/

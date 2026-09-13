@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * Remove every generated artifact: plugins/<id>/index.mjs,
- * plugins/<id>/client/entry.mjs and plugins/<id>/client/vendor/.
+ * Remove ignored generated artifacts. image-toolkit runtime entries are tracked
+ * for direct GitHub installs and are intentionally preserved.
  *
  * Safety guard. An artifact whose src/*.ts does not exist yet cannot be rebuilt.
  * While plugins are still being ported from upstream, the hand-written .mjs
@@ -38,6 +38,7 @@ const pluginDirs = existsSync(PLUGINS_DIR) ? readdirSync(PLUGINS_DIR).sort() : [
 
 for (const id of pluginDirs) {
 	const dir = join(PLUGINS_DIR, id);
+	if (id === "image-toolkit") continue;
 
 	for (const entry of ENTRIES) {
 		const artifact = join(dir, entry.artifact);
@@ -65,8 +66,7 @@ console.log(`\nclean: ${removed.length} removed, ${refused.length} kept`);
 
 if (refused.length > 0) {
 	console.error(
-		`\nRefusing to delete artifacts that have no TypeScript source yet - they would be\n` +
-			`unrecoverable, because these paths are gitignored. Port the plugin first, or\n` +
+		`\nRefusing to delete artifacts that have no TypeScript source yet. Port the plugin first, or\n` +
 			`re-run with: node scripts/clean.mjs --force`,
 	);
 	process.exit(1);

@@ -143,8 +143,8 @@ describe("full build run", () => {
 		// tracked tree, and every path it creates must be ignored.
 		const generated = gitStatusPaths().filter(
 			(path) =>
-				/^plugins\/[^/]+\/index\.mjs$/.test(path) ||
-				/^plugins\/[^/]+\/client\/entry\.mjs$/.test(path) ||
+				/^plugins\/(?!image-toolkit\/)[^/]+\/index\.mjs$/.test(path) ||
+				/^plugins\/(?!image-toolkit\/)[^/]+\/client\/entry\.mjs$/.test(path) ||
 				/^plugins\/[^/]+\/client\/vendor\//.test(path),
 		);
 		expect(generated, `generated artifacts are not gitignored`).toEqual([]);
@@ -167,7 +167,8 @@ describe("per-plugin build", () => {
 		}
 		// Every artifact it reports is a gitignored generated path.
 		for (const artifact of result.artifacts) {
-			expect(isGitIgnored(artifact), `${artifact} must be gitignored`).toBe(true);
+			const trackedInstallArtifact = artifact.startsWith("plugins/image-toolkit/");
+			expect(isGitIgnored(artifact), `${artifact} ignore policy`).toBe(!trackedInstallArtifact);
 		}
 	});
 
@@ -177,9 +178,10 @@ describe("per-plugin build", () => {
 			expect(server).toBe(`plugins/${plugin.dirName}/index.mjs`);
 			expect(client).toBe(`plugins/${plugin.dirName}/client/entry.mjs`);
 			// Those are exactly the filenames the host hardcodes, so they are also
-			// exactly what .gitignore has to cover.
-			expect(isGitIgnored(server)).toBe(true);
-			expect(isGitIgnored(client)).toBe(true);
+			// image-toolkit is the tracked direct-install exception.
+			const trackedInstallArtifact = plugin.dirName === "image-toolkit";
+			expect(isGitIgnored(server)).toBe(!trackedInstallArtifact);
+			expect(isGitIgnored(client)).toBe(!trackedInstallArtifact);
 		}
 	});
 

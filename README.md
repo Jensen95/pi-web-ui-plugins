@@ -17,65 +17,24 @@ These are English-only TypeScript ports of the upstream plugins. See
 | `mermaid`       | 📊   | Renders `mermaid` fences in messages as SVG. Renderer plugin, so the engine loads only when such a fence appears.          | none                                      |
 | `run-trace`     | 🧭   | Aggregates a run into one replayable timeline: task, reasoning, tool calls, file changes, result.                          | none                                      |
 | `mcp-manager`   | 🔌   | Manages MCP servers through `pi-mcp-adapter`: inspect the effective config, enable or disable servers, add or remove them. | `http`                                    |
+| `image-toolkit` | 🖼    | Compresses, crops, resizes, converts, watermarks and inspects workspace images, with four AI tools.                        | `fs`, `http`, `tools`                     |
 
 `plugins/catalog.json` is the machine-readable form of this table. pi-web-ui reads it as its built-in
 plugin-marketplace list, so the two must not drift.
 
 ## Installing a plugin
 
-**Read this first.** The files pi-web-ui actually executes - `index.mjs` and `client/entry.mjs` - are
-compiled from TypeScript and **gitignored**. They are not in this repository. So the install form that
-works for upstream plugins does **not** work here:
+Compiled runtime entries are intentionally tracked so the normal GitHub install works directly:
 
 ```sh
-# DOES NOT WORK - copies plugins/webmail from the repo, which has no index.mjs or
-# client/entry.mjs in it, so the host finds a manifest and nothing to run.
-pi-web-ui install Jensen95/pi-web-ui-plugins/plugins/webmail
+pi-web-ui install Jensen95/pi-web-ui-plugins/plugins/image-toolkit
 ```
 
-### Supported: install from a GitHub Release archive
+Use the same form for any plugin in `plugins/`. The image-toolkit directory includes its server entry,
+client entry, core modules, and browser modules. Runtime packages for plugins that need them are installed
+by pi-web-ui on first activation via `ensureDeps`.
 
-[`.github/workflows/release.yml`](.github/workflows/release.yml) builds every plugin on each `v*` tag and
-attaches one `<id>.tar.gz` per plugin to the GitHub Release. Each archive contains `manifest.json`,
-`README.md`, the compiled `index.mjs` and `client/entry.mjs`, and `client/vendor/*` - and no `src/`. The
-workflow verifies every archive before uploading it, and fails the release if one is incomplete.
-
-```sh
-# 1. fetch the archive for the plugin you want
-curl -LO https://github.com/Jensen95/pi-web-ui-plugins/releases/latest/download/webmail.tar.gz
-
-# 2. unpack it
-mkdir webmail && tar -xzf webmail.tar.gz -C webmail
-
-# 3. install it (pi-web-ui install accepts a local directory)
-pi-web-ui install ./webmail
-```
-
-The plugin lands in pi-web-ui's data directory, `~/.pi-web/plugins/webmail` by default
-(`PI_WEB_DATA_DIR` overrides it).
-
-### Alternative: clone and build
-
-```sh
-git clone https://github.com/Jensen95/pi-web-ui-plugins.git
-cd pi-web-ui-plugins
-npm install
-npm run build
-pi-web-ui install ./plugins/webmail
-```
-
-### The tradeoff, stated plainly
-
-Committing the compiled output would make `pi-web-ui install <repo>/<subdir>` work directly, at the cost of
-roughly 6 MB of minified vendor bundles and generated code in git history - rebuilt on every change, never
-reviewable in a diff, and a standing invitation to hand-edit a generated file. We chose the release archive
-instead. Consequences worth knowing:
-
-- You cannot install a plugin by copying a directory out of a clone. Build it first, or use a release.
-- `mermaid` and `run-trace` load their engine from `client/vendor/` when that bundle is present and **fall
-  back to a CDN when it is not**, so a source-only copy of those two still renders while online.
-- `db-client` and `vscode-editor` need runtime npm packages (database drivers, `ssh2`). Those are not in the
-  archive either: the host installs them on first activation via `ensureDeps`.
+The release workflow remains available for tagged archives, but a release is not required for installation.
 
 ## Development
 
@@ -127,8 +86,9 @@ plugins/<id>/
   client/vendor/*      GENERATED  - gitignored, third-party bundles
 ```
 
-Nothing under the GENERATED lines is committed. `npm run build` reproduces all of it from the committed
-sources alone, which is what makes a fresh CI runner able to cut a release.
+The generated entries for most plugins are ignored and rebuilt in CI. `image-toolkit` is the intentional
+exception: its runnable entries and browser/core modules are tracked so a GitHub subdirectory install works
+without downloading an archive or running a build. Its TypeScript sources remain the source for regeneration.
 
 `scripts/build-plugins.mjs` is convention-driven: one shared builder walks `plugins/*/`, and there are no
 per-plugin build files or `package.json` files. Server bundles keep npm specifiers external
