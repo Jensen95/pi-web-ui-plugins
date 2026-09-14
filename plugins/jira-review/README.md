@@ -24,8 +24,9 @@ npm run build:jira-review
 pi-web-ui install plugins/jira-review
 ```
 
-In the plugin view, enter the Jira Cloud site URL, account email, API token, board ID, and ready-ticket JQL. The API
-token is stored in the host secret store; it is not sent to the browser state or saved in normal plugin storage.
+Open the **Settings** page in the plugin view and enter the Jira Cloud site URL, account email, API token, board ID, and
+ready-ticket JQL. The API token is sent to the plugin server only when settings are saved, then stored in the host secret
+store; it is never returned in browser state or saved in normal plugin storage.
 
 The current plugin contract exposes the browser bridge used to start chats, so review chats use the current workspace.
 The top-bar organizer and automatic project-session switching are intentionally deferred to host support; see upstream

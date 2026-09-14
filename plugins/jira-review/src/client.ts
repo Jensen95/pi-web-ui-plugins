@@ -80,6 +80,13 @@ function field(document: Document, name: string, value = "", type = "text"): HTM
 	return input;
 }
 
+function textArea(document: Document, name: string, value = ""): HTMLTextAreaElement {
+	const input = document.createElement("textarea");
+	input.dataset.field = name;
+	input.value = value;
+	return input;
+}
+
 function textList(value: readonly string[] | undefined): string {
 	return value?.length ? value.join("; ") : "none";
 }
@@ -88,6 +95,7 @@ function renderReview(document: Document, key: string, review: JiraReview): HTML
 	const panel = makeElement(document, "div");
 	panel.dataset.review = key;
 	panel.dataset.confidence = review.confidence;
+	panel.className = "jira-review__saved";
 	panel.append(
 		makeElement(document, "p", `Ready: ${review.ready ? "yes" : "no"}`),
 		makeElement(document, "p", `Difficulty: ${review.difficulty}`),
@@ -108,60 +116,191 @@ function parseFolderOverride(value: string): string[] | undefined {
 	return folders.length ? folders : undefined;
 }
 
+const VIEW_STYLE = `
+.jira-review { display: grid; gap: 16px; width: min(100%, 1200px); }
+.jira-review__header { display: grid; gap: 5px; }
+.jira-review__header h1 { margin: 0; font-size: 1.35rem; }
+.jira-review__header p { margin: 0; opacity: .72; }
+.jira-review__toolbar { display: grid; grid-template-columns: 1fr repeat(3, max-content); gap: 8px; align-items: center; }
+.jira-review__sprint { display: grid; gap: 3px; }
+.jira-review__sprint strong { font-size: 1.05rem; }
+.jira-review__settings { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.jira-review__field { display: grid; gap: 6px; }
+.jira-review__field--wide { grid-column: 1 / -1; }
+.jira-review__field span { font-weight: 600; font-size: .9em; }
+.jira-review__field input, .jira-review__field textarea { box-sizing: border-box; width: 100%; padding: 8px; font: inherit; }
+.jira-review__field textarea { min-height: 88px; resize: vertical; }
+.jira-review__actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.jira-review__folders { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 6px; }
+.jira-review__folder { display: flex; gap: 7px; align-items: center; }
+.jira-review__tickets { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.jira-review__ticket { display: grid; gap: 10px; align-content: start; padding: 14px; border: 1px solid color-mix(in srgb, currentColor 22%, transparent); border-radius: 10px; }
+.jira-review__ticket-header { display: grid; grid-template-columns: max-content 1fr; gap: 5px 9px; }
+.jira-review__ticket-key { font-weight: 700; }
+.jira-review__ticket-summary { grid-column: 1 / -1; font-size: 1.05rem; font-weight: 650; }
+.jira-review__ticket-meta { display: flex; flex-wrap: wrap; gap: 8px; opacity: .72; font-size: .9em; }
+.jira-review__ticket-folders { width: 100%; box-sizing: border-box; padding: 7px; font: inherit; }
+.jira-review__saved { display: grid; gap: 4px; padding: 10px; border-radius: 7px; background: color-mix(in srgb, currentColor 8%, transparent); }
+.jira-review__saved p { margin: 0; }
+.jira-review__error { margin: 0; color: #b42318; }
+@media (max-width: 900px) {
+  .jira-review__toolbar { grid-template-columns: 1fr 1fr; }
+  .jira-review__sprint { grid-column: 1 / -1; }
+  .jira-review__tickets { grid-template-columns: 1fr; }
+}
+@media (max-width: 600px) {
+  .jira-review__settings { grid-template-columns: 1fr; }
+  .jira-review__field--wide { grid-column: auto; }
+  .jira-review__toolbar { grid-template-columns: 1fr; }
+}
+`;
+
+type Page = "dashboard" | "settings";
+type SettingsField = HTMLInputElement | HTMLTextAreaElement;
+
+function appendSettingsField(
+	document: Document,
+	form: HTMLFormElement,
+	fields: Map<string, SettingsField>,
+	name: string,
+	labelText: string,
+	value: string,
+	type: "text" | "password" | "textarea" = "text",
+	wide = false,
+): void {
+	const label = makeElement(document, "label");
+	label.className = `jira-review__field${wide ? " jira-review__field--wide" : ""}`;
+	label.append(makeElement(document, "span", labelText));
+	const input = type === "textarea" ? textArea(document, name, value) : field(document, name, value, type);
+	fields.set(name, input);
+	label.append(input);
+	form.append(label);
+}
+
 export default {
 	mount(container: HTMLElement, ctx: ViewContext): () => void {
 		const document = container.ownerDocument;
 		let state: ReviewState = {};
+		let page: Page = "settings";
 		let selectedFolders: string[] = [];
 		let ticketFolderInputs = new Map<string, HTMLInputElement>();
 		const bridge =
 			document.defaultView && (document.defaultView as Window & { __piWebUiHost?: StartChatHost }).__piWebUiHost;
 
-		const render = (): void => {
-			const config = state.config ?? {};
-			const root = makeElement(document, "section");
-			root.dataset.ui = "jira-review";
-			root.append(makeElement(document, "h2", "Jira review"));
+		const style = (): HTMLStyleElement => {
+			const element = document.createElement("style");
+			element.textContent = VIEW_STYLE;
+			return element;
+		};
 
-			const configForm = makeElement(document, "form");
-			configForm.dataset.ui = "jira-config";
-			configForm.append(
-				field(document, "siteUrl", config.siteUrl),
-				field(document, "email", config.email),
-				field(document, "apiToken", "", "password"),
-				field(document, "boardId", config.boardId),
-				field(document, "readyJql", config.readyJql || DEFAULT_READY_JQL),
+		const renderSettings = (): HTMLElement => {
+			const root = makeElement(document, "section");
+			root.className = "jira-review";
+			const header = makeElement(document, "header");
+			header.className = "jira-review__header";
+			header.append(
+				makeElement(document, "h1", "Jira settings"),
+				makeElement(document, "p", "Credentials are stored by the plugin server, not in browser storage."),
 			);
-			const save = makeElement(document, "button", "Save configuration");
-			(save as HTMLButtonElement).type = "submit";
-			configForm.append(save);
-			configForm.addEventListener("submit", (event) => {
-				event?.preventDefault?.();
-				const inputs = ([...configForm.children] as HTMLElement[]).filter((child) => child.dataset.field);
-				const values = Object.fromEntries(
-					inputs.map((input) => [input.dataset.field, (input as HTMLInputElement).value]),
-				);
+
+			const form = makeElement(document, "form") as HTMLFormElement;
+			form.dataset.ui = "jira-settings";
+			form.className = "jira-review__settings";
+			const fields = new Map<string, SettingsField>();
+			const config = state.config ?? {};
+			appendSettingsField(document, form, fields, "siteUrl", "Jira Cloud site URL", config.siteUrl ?? "");
+			appendSettingsField(document, form, fields, "email", "Account email", config.email ?? "");
+			appendSettingsField(document, form, fields, "apiToken", "API token", "", "password");
+			const token = fields.get("apiToken");
+			if (token && "placeholder" in token) token.placeholder = "Leave blank to keep the saved token";
+			appendSettingsField(document, form, fields, "boardId", "Board ID", config.boardId ?? "");
+			appendSettingsField(
+				document,
+				form,
+				fields,
+				"readyJql",
+				"Ready-ticket JQL",
+				config.readyJql || DEFAULT_READY_JQL,
+				"textarea",
+				true,
+			);
+
+			const actions = makeElement(document, "div");
+			actions.className = "jira-review__actions jira-review__field--wide";
+			const save = makeElement(document, "button", "Save settings") as HTMLButtonElement;
+			save.type = "submit";
+			save.dataset.action = "save-settings";
+			actions.append(save);
+			if (state.configured) {
+				const back = makeElement(document, "button", "Back to reviews") as HTMLButtonElement;
+				back.type = "button";
+				back.dataset.action = "dashboard";
+				back.addEventListener("click", () => {
+					page = "dashboard";
+					render();
+				});
+				actions.append(back);
+			}
+			form.append(actions);
+			form.addEventListener("submit", (event) => {
+				event.preventDefault();
+				const value = (name: string): string => fields.get(name)?.value ?? "";
 				ctx.send({
 					action: "save_config",
-					config: { siteUrl: values.siteUrl, email: values.email, boardId: values.boardId, readyJql: values.readyJql },
-					token: values.apiToken,
+					config: {
+						siteUrl: value("siteUrl"),
+						email: value("email"),
+						boardId: value("boardId"),
+						readyJql: value("readyJql"),
+					},
+					token: value("apiToken"),
 				});
+				page = "dashboard";
+				render();
 			});
-			root.append(configForm);
 
-			const sprint = makeElement(
-				document,
-				"p",
-				state.activeSprint ? `Current sprint: ${state.activeSprint.name}` : "Current sprint: none",
+			root.append(style(), header, form);
+			if (state.error) {
+				const error = makeElement(document, "p", state.error);
+				error.className = "jira-review__error";
+				root.append(error);
+			}
+			return root;
+		};
+
+		const renderDashboard = (): HTMLElement => {
+			const root = makeElement(document, "section");
+			root.className = "jira-review";
+			root.dataset.ui = "jira-dashboard";
+			const config = state.config ?? {};
+			const header = makeElement(document, "header");
+			header.className = "jira-review__header";
+			header.append(
+				makeElement(document, "h1", "Jira review"),
+				makeElement(document, "p", config.siteUrl ?? "Jira Cloud"),
 			);
-			root.append(sprint);
 
-			const refresh = makeElement(document, "button", "Refresh active sprint");
-			(refresh as HTMLButtonElement).type = "button";
+			const toolbar = makeElement(document, "div");
+			toolbar.className = "jira-review__toolbar";
+			const sprint = makeElement(document, "div");
+			sprint.className = "jira-review__sprint";
+			sprint.append(
+				makeElement(document, "span", "Active sprint"),
+				makeElement(document, "strong", state.activeSprint?.name ?? "None loaded"),
+			);
+			const refresh = makeElement(document, "button", "Refresh tickets") as HTMLButtonElement;
+			refresh.type = "button";
 			refresh.dataset.action = "refresh";
 			refresh.addEventListener("click", () => ctx.send({ action: "refresh" }));
-			const start = makeElement(document, "button", "Start reviews");
-			(start as HTMLButtonElement).type = "button";
+			const settings = makeElement(document, "button", "Settings") as HTMLButtonElement;
+			settings.type = "button";
+			settings.dataset.action = "settings";
+			settings.addEventListener("click", () => {
+				page = "settings";
+				render();
+			});
+			const start = makeElement(document, "button", "Start reviews") as HTMLButtonElement;
+			start.type = "button";
 			start.dataset.action = "start-reviews";
 			start.addEventListener("click", () => {
 				const overrides: Record<string, string[]> = {};
@@ -171,35 +310,56 @@ export default {
 				}
 				startTicketReviews(bridge, state.tickets ?? [], selectedFolders, overrides);
 			});
-			root.append(refresh, start);
+			toolbar.append(sprint, refresh, settings, start);
 
-			const folderPanel = makeElement(document, "div");
-			folderPanel.dataset.ui = "folders";
+			const foldersPanel = makeElement(document, "section");
+			foldersPanel.dataset.ui = "folders";
+			foldersPanel.append(makeElement(document, "h2", "Workspace scope"));
+			const folderGrid = makeElement(document, "div");
+			folderGrid.className = "jira-review__folders";
 			for (const folder of state.folders ?? []) {
+				const label = makeElement(document, "label");
+				label.className = "jira-review__folder";
 				const checkbox = field(document, "folder", folder, "checkbox");
 				checkbox.dataset.folder = folder;
 				checkbox.checked = selectedFolders.includes(folder);
 				checkbox.addEventListener("change", () => {
-					selectedFolders = [...folderPanel.children]
-						.filter((child) => (child as HTMLInputElement).checked)
-						.map((child) => (child as HTMLInputElement).value);
+					selectedFolders = [...folderGrid.children].flatMap((child) => {
+						const input = child.children[0] as HTMLInputElement | undefined;
+						return input?.checked ? [input.value] : [];
+					});
 				});
-				folderPanel.append(checkbox, makeElement(document, "span", folder));
+				label.append(checkbox, makeElement(document, "span", folder));
+				folderGrid.append(label);
 			}
-			root.append(folderPanel);
+			foldersPanel.append(folderGrid);
 
-			const ticketPanel = makeElement(document, "div");
+			const ticketsPanel = makeElement(document, "section");
+			ticketsPanel.dataset.ui = "tickets";
+			ticketsPanel.append(makeElement(document, "h2", `Ready tickets (${state.tickets?.length ?? 0})`));
+			const ticketGrid = makeElement(document, "div");
+			ticketGrid.className = "jira-review__tickets";
 			ticketFolderInputs = new Map();
 			for (const ticket of state.tickets ?? []) {
 				const row = makeElement(document, "article");
+				row.className = "jira-review__ticket";
 				row.dataset.key = ticket.key;
-				row.append(makeElement(document, "strong", `${ticket.key}: ${ticket.summary}`));
-				row.append(makeElement(document, "p", ticket.status));
+				const ticketHeader = makeElement(document, "div");
+				ticketHeader.className = "jira-review__ticket-header";
+				ticketHeader.append(
+					Object.assign(makeElement(document, "span", ticket.key), { className: "jira-review__ticket-key" }),
+					makeElement(document, "span", ticket.status || "No status"),
+					Object.assign(makeElement(document, "strong", ticket.summary), { className: "jira-review__ticket-summary" }),
+				);
+				const meta = makeElement(document, "div");
+				meta.className = "jira-review__ticket-meta";
+				meta.append(makeElement(document, "span", ticket.assignee ? `Assigned to ${ticket.assignee}` : "Unassigned"));
 				const folders = field(document, "ticket-folders");
+				folders.className = "jira-review__ticket-folders";
 				folders.dataset.key = ticket.key;
 				folders.placeholder = "Optional folder override, comma-separated";
 				ticketFolderInputs.set(ticket.key, folders);
-				row.append(folders);
+				row.append(ticketHeader, meta, folders);
 				const review = state.reviews?.[ticket.key];
 				if (review) row.append(renderReview(document, ticket.key, review));
 				const post = makeElement(document, "button", "Post review") as HTMLButtonElement;
@@ -212,19 +372,32 @@ export default {
 						ctx.send({ action: "post_review", key: ticket.key, comment: review.draftComment });
 				});
 				row.append(post);
-				ticketPanel.append(row);
+				ticketGrid.append(row);
 			}
-			root.append(ticketPanel);
-			if (state.error) root.append(makeElement(document, "p", state.error));
+			ticketsPanel.append(ticketGrid);
+
+			root.append(style(), header, toolbar, foldersPanel, ticketsPanel);
+			if (state.error) {
+				const error = makeElement(document, "p", state.error);
+				error.className = "jira-review__error";
+				root.append(error);
+			}
 			if (state.notice) root.append(makeElement(document, "p", state.notice));
-			container.replaceChildren(root);
+			return root;
+		};
+
+		const render = (): void => {
+			container.replaceChildren(!state.configured || page === "settings" ? renderSettings() : renderDashboard());
 		};
 
 		const off = ctx.onData((payload) => {
 			if (!payload || typeof payload !== "object") return;
 			const message = payload as { kind?: unknown; state?: ReviewState; error?: unknown };
 			if (message.kind === "state") {
+				const wasConfigured = state.configured === true;
 				state = message.state ?? {};
+				if (!state.configured) page = "settings";
+				else if (!wasConfigured) page = "dashboard";
 				render();
 			} else if (message.kind === "result" && typeof message.error === "string") {
 				state = { ...state, error: message.error };

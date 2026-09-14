@@ -179,6 +179,8 @@ describe("Jira review server", () => {
 			activeSprint: { id: 7, name: "Sprint 12" },
 			tickets: [{ key: "ABC-1", summary: "Ready ticket", status: "To Do" }],
 		});
+		expect(lastState(host).config).not.toHaveProperty("apiToken");
+		expect(lastState(host).config).not.toHaveProperty("token");
 		expect(calls.every((call) => call.init?.method !== "POST" && call.init?.method !== "PUT")).toBe(true);
 		deactivate?.();
 		vi.unstubAllGlobals();
@@ -314,6 +316,62 @@ describe("Jira review client", () => {
 				{},
 			),
 		).not.toThrow();
+	});
+
+	it("starts with a server-backed settings page and sends credentials only on save", () => {
+		const { ctx, sent } = createMockViewContext("jira-review");
+		const document = createFakeDocument();
+		const container = document.createElement("div");
+		jiraClient.mount?.(container as unknown as HTMLElement, ctx);
+
+		expect(descendants(container).some((element) => element.dataset.ui === "jira-settings")).toBe(true);
+		const token = descendants(container).find((element) => element.dataset.field === "apiToken");
+		expect(token?.type).toBe("password");
+		const form = descendants(container).find((element) => element.dataset.ui === "jira-settings");
+		expect(form).toBeDefined();
+		const values: Record<string, string> = {
+			siteUrl: CONFIG.siteUrl,
+			email: CONFIG.email,
+			apiToken: TOKEN,
+			boardId: CONFIG.boardId,
+			readyJql: CONFIG.readyJql,
+		};
+		for (const input of descendants(form!).filter((element) => element.dataset.field)) {
+			input.value = values[input.dataset.field];
+		}
+		form!.dispatch("submit", { preventDefault: vi.fn() });
+
+		expect(sent).toContainEqual({ action: "get_state" });
+		expect(sent).toContainEqual({ action: "save_config", config: CONFIG, token: TOKEN });
+	});
+
+	it("separates the review dashboard from settings and uses responsive grids", () => {
+		const { ctx, push } = createMockViewContext("jira-review");
+		const document = createFakeDocument();
+		const container = document.createElement("div");
+		jiraClient.mount?.(container as unknown as HTMLElement, ctx);
+		push({
+			kind: "state",
+			state: {
+				configured: true,
+				config: CONFIG,
+				folders: [],
+				tickets: [{ key: "ABC-1", summary: "Ticket", description: "Description", status: "To Do" }],
+				reviews: {},
+				activeSprint: { id: 7, name: "Sprint 12", state: "active" },
+			},
+		});
+
+		expect(descendants(container).some((element) => element.dataset.ui === "jira-dashboard")).toBe(true);
+		expect(descendants(container).some((element) => element.dataset.action === "settings")).toBe(true);
+		const style = descendants(container).find((element) => element.tagName === "style")?.textContent ?? "";
+		expect(style).toContain(".jira-review__tickets { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));");
+		expect(style).toContain(".jira-review__settings { display: grid;");
+
+		descendants(container)
+			.find((element) => element.dataset.action === "settings")!
+			.click();
+		expect(descendants(container).some((element) => element.dataset.ui === "jira-settings")).toBe(true);
 	});
 
 	it("mounts a view that sends state requests and exposes explicit review/post controls", () => {
