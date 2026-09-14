@@ -480,7 +480,11 @@ describe("catalog-sync view", () => {
 		expect(findText(container, SYNC_TITLE)).toBeDefined();
 		expect(findText(container, UPDATE_TITLE)).toBeDefined();
 		const style = findElements(container, (element) => element.type === "style")[0]?.textContent ?? "";
-		expect(style).toContain(".catalog-sync__cards { display: grid; grid-template-columns:");
+		expect(style).toContain(".catalog-sync__cards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));");
+		expect(style).toContain("@media (max-width: 1000px)");
+		expect(style).toContain("@media (max-width: 760px)");
+		expect(style).toContain("@media (max-width: 560px)");
+		expect(style).toContain("grid-template-columns: 1fr;");
 		expect(style).toContain(".catalog-sync__actions { display: grid;");
 	});
 

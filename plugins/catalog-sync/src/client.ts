@@ -184,14 +184,14 @@ async function fetchCatalog(): Promise<CatalogEntry[]> {
 }
 
 const VIEW_STYLE = `
-.catalog-sync { display: grid; gap: 14px; max-width: 760px; }
+.catalog-sync { display: grid; gap: 14px; width: min(100%, 1200px); }
 .catalog-sync__header { display: grid; gap: 4px; }
 .catalog-sync__header h1 { margin: 0; font-size: 1.25rem; }
 .catalog-sync__header p, .catalog-sync__status { margin: 0; opacity: .75; }
 .catalog-sync__actions { display: grid; grid-template-columns: max-content max-content 1fr; gap: 8px; align-items: center; }
 .catalog-sync__actions button { cursor: pointer; }
 .catalog-sync__selection { justify-self: end; opacity: .7; font-size: .9em; }
-.catalog-sync__cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 10px; align-items: stretch; }
+.catalog-sync__cards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; align-items: stretch; }
 .catalog-sync__card { display: grid; height: 100%; box-sizing: border-box; padding: 12px; border: 1px solid color-mix(in srgb, currentColor 22%, transparent); border-radius: 8px; }
 .catalog-sync__card > label { display: grid; grid-template-columns: auto 1fr; gap: 10px; cursor: pointer; }
 .catalog-sync__card input { margin-top: 4px; }
@@ -199,9 +199,16 @@ const VIEW_STYLE = `
 .catalog-sync__body h2 { margin: 0; font-size: 1rem; }
 .catalog-sync__body p { margin: 0; opacity: .8; }
 .catalog-sync__source { overflow-wrap: anywhere; opacity: .65; font-size: .85em; }
+@media (max-width: 1000px) {
+  .catalog-sync__cards { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 760px) {
+  .catalog-sync__cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 @media (max-width: 560px) {
   .catalog-sync__actions { grid-template-columns: 1fr 1fr; }
   .catalog-sync__selection { grid-column: 1 / -1; justify-self: start; }
+  .catalog-sync__cards { grid-template-columns: 1fr; }
 }
 `;
 
