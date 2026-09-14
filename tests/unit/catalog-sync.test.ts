@@ -479,6 +479,9 @@ describe("catalog-sync view", () => {
 		).toBe(true);
 		expect(findText(container, SYNC_TITLE)).toBeDefined();
 		expect(findText(container, UPDATE_TITLE)).toBeDefined();
+		const style = findElements(container, (element) => element.type === "style")[0]?.textContent ?? "";
+		expect(style).toContain(".catalog-sync__cards { display: grid; grid-template-columns:");
+		expect(style).toContain(".catalog-sync__actions { display: grid;");
 	});
 
 	it("syncs the catalog without installing a plugin", async () => {
