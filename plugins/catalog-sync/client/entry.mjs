@@ -2,21 +2,26 @@
 
 // plugins/catalog-sync/src/client.ts
 var CATALOG_URL = "https://raw.githubusercontent.com/Jensen95/pi-web-ui-plugins/main/plugins/catalog.json";
+var SOURCE_REPOSITORY = "Jensen95/pi-web-ui-plugins";
 var EVENT_NAME = "pi-web-ui:plugin-run-command";
 var COMMAND_TITLE = "Reload custom plugins";
-var SELF_SOURCE = "Jensen95/pi-web-ui-plugins/plugins/catalog-sync";
+var SELF_SOURCE = `${SOURCE_REPOSITORY}/plugins/catalog-sync`;
 var COMMAND_SCRIPT = `
 const response = await fetch(${JSON.stringify(CATALOG_URL)}, { signal: AbortSignal.timeout(30000) });
 if (!response.ok) throw new Error("catalog request failed: HTTP " + response.status);
 const entries = await response.json();
 if (!Array.isArray(entries) || entries.length === 0) throw new Error("catalog must be a non-empty JSON array");
+const sourcePrefix = ${JSON.stringify(`${SOURCE_REPOSITORY}/plugins/`)};
 const ids = new Set();
 for (const entry of entries) {
   const source = entry && typeof entry === "object" ? entry.source : undefined;
   const id = entry && typeof entry === "object" ? entry.id : undefined;
-  const isUrl = typeof source === "string" && (source.startsWith("http://") || source.startsWith("https://")) && !/\\s/.test(source);
-  const isRepo = typeof source === "string" && /^[A-Za-z0-9_.-]+\\/[A-Za-z0-9_.-]+(?:\\/[A-Za-z0-9_.-]+)*(?:#[A-Za-z0-9_.-]+)?$/.test(source);
-  if (typeof id !== "string" || !/^[A-Za-z0-9_-]+$/.test(id) || typeof source !== "string" || source.trim() === "" || (!isUrl && !isRepo)) {
+  if (
+    typeof id !== "string" ||
+    !/^[A-Za-z0-9_-]+$/.test(id) ||
+    typeof source !== "string" ||
+    source.trim() !== sourcePrefix + id
+  ) {
     throw new Error("catalog contains an invalid plugin id or source");
   }
   if (ids.has(id)) throw new Error("catalog contains duplicate plugin id: " + id);
@@ -28,22 +33,45 @@ const path = await import("node:path");
 const childProcess = await import("node:child_process");
 const configured = process.env.PI_WEB_DATA_DIR?.trim();
 const dataDir = configured || path.join(os.homedir(), ".pi-web");
-for (const entry of entries) {
-  if (entry.id === "catalog-sync") continue;
-  const cli = process.platform === "win32" ? "pi-web-ui.cmd" : "pi-web-ui";
-  const result = childProcess.spawnSync(cli, ["install", entry.source.trim(), "--name", entry.id, "--force"], { stdio: "inherit" });
+const npm = process.platform === "win32" ? "npm.cmd" : "npm";
+const cli = process.platform === "win32" ? "pi-web-ui.cmd" : "pi-web-ui";
+const checkout = fs.mkdtempSync(path.join(os.tmpdir(), "pi-web-ui-plugins-"));
+const run = (command, args, cwd) => {
+  const result = childProcess.spawnSync(command, args, { cwd, stdio: "inherit" });
   if (result.error) throw result.error;
-  if (result.status !== 0) process.exit(result.status ?? 1);
-}
-fs.mkdirSync(dataDir, { recursive: true });
-const catalogPath = path.join(dataDir, "plugin-catalog.json");
-const temporaryPath = catalogPath + ".tmp-" + process.pid;
+  if (result.status !== 0) throw new Error(command + " failed with exit code " + (result.status ?? "unknown"));
+};
 try {
-  fs.writeFileSync(temporaryPath, JSON.stringify({ entries }, null, 2) + "\\n");
-  fs.renameSync(temporaryPath, catalogPath);
-} catch (error) {
-  try { fs.unlinkSync(temporaryPath); } catch {}
-  throw error;
+  run("git", ["clone", "--depth", "1", ${JSON.stringify(`https://github.com/${SOURCE_REPOSITORY}.git`)}, checkout]);
+  run(npm, ["ci"], checkout);
+  run(npm, ["run", "build"], checkout);
+
+  for (const entry of entries) {
+    const pluginDir = path.join(checkout, "plugins", entry.id);
+    const hasManifest = fs.existsSync(path.join(pluginDir, "manifest.json"));
+    const hasServerEntry = fs.existsSync(path.join(pluginDir, "index.mjs"));
+    const hasClientEntry = fs.existsSync(path.join(pluginDir, "client", "entry.mjs"));
+    if (!hasManifest || (!hasServerEntry && !hasClientEntry)) {
+      throw new Error("build did not produce a runnable plugin: " + entry.id);
+    }
+  }
+  for (const entry of entries) {
+    if (entry.id === "catalog-sync") continue;
+    run(cli, ["install", path.join(checkout, "plugins", entry.id), "--name", entry.id, "--force"]);
+  }
+
+  fs.mkdirSync(dataDir, { recursive: true });
+  const catalogPath = path.join(dataDir, "plugin-catalog.json");
+  const temporaryPath = catalogPath + ".tmp-" + process.pid;
+  try {
+    fs.writeFileSync(temporaryPath, JSON.stringify({ entries }, null, 2) + "\\n");
+    fs.renameSync(temporaryPath, catalogPath);
+  } catch (error) {
+    try { fs.unlinkSync(temporaryPath); } catch {}
+    throw error;
+  }
+} finally {
+  fs.rmSync(checkout, { recursive: true, force: true });
 }
 `;
 function reloadCommand() {
@@ -91,6 +119,7 @@ export {
   CATALOG_URL,
   COMMAND_TITLE,
   EVENT_NAME,
+  SOURCE_REPOSITORY,
   client_default as default,
   reloadCommand
 };

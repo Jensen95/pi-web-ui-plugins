@@ -93,32 +93,101 @@ function decodeCommandScript(command: string): string {
 	return Buffer.from(encoded, "base64").toString("utf8");
 }
 
+interface ScriptOptions {
+	failId?: string;
+	failPhase?: "clone" | "npm-ci" | "npm-build";
+	httpStatus?: number;
+	previousCatalog?: string;
+	skipBuildArtifacts?: boolean;
+	pathWithSpaces?: boolean;
+}
+
 interface ScriptRun {
 	status: number | null;
 	stderr: string;
 	calls: string[];
 	catalog: string | undefined;
+	checkoutExists: boolean;
+	installArgs: string[][];
 }
 
-async function runCommandScript(
-	entries: unknown,
-	failId = "",
-	httpStatus = 200,
-	previousCatalog?: string,
-): Promise<ScriptRun> {
+async function runCommandScript(entries: unknown, options: ScriptOptions = {}): Promise<ScriptRun> {
 	const root = mkdtempSync(join(tmpdir(), "catalog-sync-script-"));
 	const bin = join(root, "bin");
 	const dataDir = join(root, "data");
 	const log = join(root, "calls.log");
+	const checkoutLog = join(root, "checkout.log");
+	const argvLog = join(root, "argv.log");
+	const tempRoot = options.pathWithSpaces ? join(root, "temp path") : root;
 	mkdirSync(bin, { recursive: true });
-	if (previousCatalog !== undefined) {
+	mkdirSync(tempRoot, { recursive: true });
+	if (options.previousCatalog !== undefined) {
 		mkdirSync(dataDir, { recursive: true });
-		writeFileSync(join(dataDir, "plugin-catalog.json"), previousCatalog, "utf8");
+		writeFileSync(join(dataDir, "plugin-catalog.json"), options.previousCatalog, "utf8");
 	}
+
+	const ids = Array.isArray(entries)
+		? entries
+				.filter((entry): entry is { id?: unknown } => Boolean(entry && typeof entry === "object"))
+				.map((entry) => String(entry.id ?? ""))
+				.filter(Boolean)
+				.join(",")
+		: "";
+	const git = join(bin, "git");
+	writeFileSync(
+		git,
+		String.raw`#!/usr/bin/env node
+const { appendFileSync, mkdirSync, writeFileSync } = require("node:fs");
+const { join } = require("node:path");
+const args = process.argv.slice(2);
+appendFileSync(process.env.CATALOG_SYNC_LOG, "git:" + args.join(" ") + String.fromCharCode(10));
+const checkout = args.at(-1);
+writeFileSync(process.env.CATALOG_SYNC_CHECKOUT, checkout);
+mkdirSync(checkout, { recursive: true });
+for (const id of (process.env.CATALOG_SYNC_IDS || "").split(",").filter(Boolean)) {
+  mkdirSync(join(checkout, "plugins", id), { recursive: true });
+  writeFileSync(join(checkout, "plugins", id, "manifest.json"), JSON.stringify({ name: "test" }) + String.fromCharCode(10));
+}
+if (process.env.FAIL_PHASE === "clone") process.exit(11);
+`,
+		"utf8",
+	);
+	chmodSync(git, 0o755);
+
+	const npm = join(bin, "npm");
+	writeFileSync(
+		npm,
+		String.raw`#!/usr/bin/env node
+const { appendFileSync, mkdirSync, writeFileSync } = require("node:fs");
+const { join } = require("node:path");
+const args = process.argv.slice(2);
+appendFileSync(process.env.CATALOG_SYNC_LOG, "npm:" + process.cwd() + ":" + args.join(" ") + String.fromCharCode(10));
+if (args[0] === "ci" && process.env.FAIL_PHASE === "npm-ci") process.exit(12);
+if (args[0] === "run" && args[1] === "build") {
+  if (process.env.FAIL_PHASE === "npm-build") process.exit(13);
+  if (process.env.SKIP_BUILD_ARTIFACTS !== "1") {
+    for (const id of (process.env.CATALOG_SYNC_IDS || "").split(",").filter(Boolean)) {
+      mkdirSync(join(process.cwd(), "plugins", id, "client"), { recursive: true });
+      writeFileSync(join(process.cwd(), "plugins", id, "client", "entry.mjs"), "built\\n");
+    }
+  }
+}
+`,
+		"utf8",
+	);
+	chmodSync(npm, 0o755);
+
 	const cli = join(bin, "pi-web-ui");
 	writeFileSync(
 		cli,
-		'#!/bin/sh\nprintf "%s\\n" "$*" >> "$CATALOG_SYNC_LOG"\nif [ -n "$FAIL_ID" ]; then case "$*" in *"--name $FAIL_ID "*) exit 7;; esac; fi\n',
+		String.raw`#!/usr/bin/env node
+const { appendFileSync } = require("node:fs");
+const args = process.argv.slice(2);
+appendFileSync(process.env.CATALOG_SYNC_LOG, "pi-web-ui:" + args.join(" ") + String.fromCharCode(10));
+appendFileSync(process.env.CATALOG_SYNC_ARGV, JSON.stringify(args) + String.fromCharCode(10));
+const nameIndex = args.indexOf("--name");
+if (process.env.FAIL_ID && nameIndex >= 0 && args[nameIndex + 1] === process.env.FAIL_ID) process.exit(7);
+`,
 		"utf8",
 	);
 	chmodSync(cli, 0o755);
@@ -126,45 +195,75 @@ async function runCommandScript(
 	const { reloadCommand } = await loadSource();
 	const source = decodeCommandScript(reloadCommand());
 	const response = JSON.stringify(entries) ?? "undefined";
+	const httpStatus = options.httpStatus ?? 200;
 	const runner = `globalThis.fetch = async () => ({ ok: ${httpStatus >= 200 && httpStatus < 300}, status: ${httpStatus}, json: async () => ${response} }); await (async () => {${source}})();`;
 	const result = spawnSync(process.execPath, ["--input-type=module", "-e", runner], {
 		encoding: "utf8",
 		env: {
 			...process.env,
 			PATH: `${bin}:${process.env.PATH ?? ""}`,
+			TMPDIR: tempRoot,
 			CATALOG_SYNC_LOG: log,
+			CATALOG_SYNC_ARGV: argvLog,
+			CATALOG_SYNC_CHECKOUT: checkoutLog,
+			CATALOG_SYNC_IDS: ids,
 			PI_WEB_DATA_DIR: dataDir,
-			FAIL_ID: failId,
+			FAIL_ID: options.failId ?? "",
+			FAIL_PHASE: options.failPhase ?? "",
+			SKIP_BUILD_ARTIFACTS: options.skipBuildArtifacts ? "1" : "",
 		},
 	});
-	const calls = existsSync(log) ? readFileSync(log, "utf8").trim().split("\n").filter(Boolean) : [];
+	const checkoutPath = existsSync(checkoutLog) ? readFileSync(checkoutLog, "utf8") : "";
+	const calls = existsSync(log)
+		? readFileSync(log, "utf8")
+				.trim()
+				.split("\n")
+				.filter(Boolean)
+				.map((line) => line.replaceAll(checkoutPath, "<tmp>/checkout").replaceAll(root, "<tmp>"))
+		: [];
+	const checkoutExists = checkoutPath !== "" && existsSync(checkoutPath);
+	const installArgs = existsSync(argvLog)
+		? readFileSync(argvLog, "utf8")
+				.trim()
+				.split("\n")
+				.filter(Boolean)
+				.map((line) =>
+					(JSON.parse(line) as string[]).map((arg) =>
+						arg.replaceAll(checkoutPath, "<tmp>/checkout").replaceAll(root, "<tmp>"),
+					),
+				)
+		: [];
 	const catalogPath = join(dataDir, "plugin-catalog.json");
 	const catalog = existsSync(catalogPath) ? readFileSync(catalogPath, "utf8") : undefined;
 	rmSync(root, { recursive: true, force: true });
-	return { status: result.status, stderr: result.stderr ?? "", calls, catalog };
+	return { status: result.status, stderr: result.stderr ?? "", calls, catalog, checkoutExists, installArgs };
 }
 
 describe("catalog-sync terminal command", () => {
 	const entries = [
-		{ id: "alpha", source: "owner/repo/plugins/alpha" },
-		{ id: "catalog-sync", source: "owner/repo/plugins/catalog-sync" },
-		{ id: "beta", source: "https://example.com/plugins/beta" },
+		{ id: "alpha", source: "Jensen95/pi-web-ui-plugins/plugins/alpha" },
+		{ id: "catalog-sync", source: "Jensen95/pi-web-ui-plugins/plugins/catalog-sync" },
+		{ id: "beta", source: "Jensen95/pi-web-ui-plugins/plugins/beta" },
 	];
 
-	it("installs each source with its catalog id and publishes the catalog atomically", async () => {
+	it("clones, builds once, installs local artifacts with ids, and publishes the catalog", async () => {
 		const run = await runCommandScript(entries);
 
-		expect(run.status).toBe(0);
-		expect(run.calls).toEqual([
-			"install owner/repo/plugins/alpha --name alpha --force",
-			"install https://example.com/plugins/beta --name beta --force",
+		expect(run.status, run.stderr).toBe(0);
+		expect(run.calls, run.stderr).toEqual([
+			"git:clone --depth 1 https://github.com/Jensen95/pi-web-ui-plugins.git <tmp>/checkout",
+			"npm:<tmp>/checkout:ci",
+			"npm:<tmp>/checkout:run build",
+			"pi-web-ui:install <tmp>/checkout/plugins/alpha --name alpha --force",
+			"pi-web-ui:install <tmp>/checkout/plugins/beta --name beta --force",
 		]);
 		expect(JSON.parse(run.catalog ?? "null")).toEqual({ entries });
+		expect(run.checkoutExists).toBe(false);
 	});
 
-	it("rejects an HTTP failure without installing or replacing the catalog", async () => {
-		const previous = '{"entries":[{"id":"old","source":"owner/repo/old"}]}\n';
-		const run = await runCommandScript([], "", 503, previous);
+	it("rejects an HTTP failure without cloning or replacing the catalog", async () => {
+		const previous = '{"entries":[{"id":"old","source":"Jensen95/pi-web-ui-plugins/plugins/old"}]}\n';
+		const run = await runCommandScript([], { httpStatus: 503, previousCatalog: previous });
 		expect(run.status).not.toBe(0);
 		expect(run.calls).toEqual([]);
 		expect(run.catalog).toBe(previous);
@@ -174,29 +273,59 @@ describe("catalog-sync terminal command", () => {
 		["a non-array response", null],
 		["an empty catalog", []],
 		["an entry without a source", [{ id: "broken" }]],
-		["an invalid id", [{ id: "bad id", source: "owner/repo/plugin" }]],
+		["an invalid id", [{ id: "bad id", source: "Jensen95/pi-web-ui-plugins/plugins/bad-id" }]],
+		["an arbitrary URL", [{ id: "remote", source: "https://example.com/plugins/remote" }]],
+		["a source whose path does not match its id", [{ id: "alpha", source: "Jensen95/pi-web-ui-plugins/plugins/beta" }]],
 		[
 			"duplicate ids",
 			[
-				{ id: "same", source: "owner/repo/one" },
-				{ id: "same", source: "owner/repo/two" },
+				{ id: "same", source: "Jensen95/pi-web-ui-plugins/plugins/same" },
+				{ id: "same", source: "Jensen95/pi-web-ui-plugins/plugins/same" },
 			],
 		],
-	] as const)("rejects %s without installing or replacing the catalog", async (_label, value) => {
+	] as const)("rejects %s without cloning or replacing the catalog", async (_label, value) => {
 		const run = await runCommandScript(value);
 		expect(run.status).not.toBe(0);
 		expect(run.calls).toEqual([]);
 		expect(run.catalog).toBeUndefined();
 	});
 
-	it("leaves the previous catalog untouched when an install fails", async () => {
-		const previous = '{"entries":[{"id":"old","source":"owner/repo/old"}]}\n';
-		const run = await runCommandScript(entries, "beta", 200, previous);
+	it.each(["clone", "npm-ci", "npm-build"] as const)(
+		"cleans the temporary checkout and preserves the catalog when %s fails",
+		async (phase) => {
+			const previous = '{"entries":[{"id":"old","source":"Jensen95/pi-web-ui-plugins/plugins/old"}]}\n';
+			const run = await runCommandScript(entries, { failPhase: phase, previousCatalog: previous });
+			expect(run.status, run.stderr).not.toBe(0);
+			expect(run.checkoutExists).toBe(false);
+			expect(run.catalog).toBe(previous);
+		},
+	);
 
-		expect(run.status).toBe(7);
-		expect(run.calls).toEqual([
-			"install owner/repo/plugins/alpha --name alpha --force",
-			"install https://example.com/plugins/beta --name beta --force",
+	it("passes a checkout path containing spaces as one install argument", async () => {
+		const run = await runCommandScript(entries, { pathWithSpaces: true });
+		expect(run.status, run.stderr).toBe(0);
+		expect(run.installArgs).toEqual([
+			["install", "<tmp>/checkout/plugins/alpha", "--name", "alpha", "--force"],
+			["install", "<tmp>/checkout/plugins/beta", "--name", "beta", "--force"],
+		]);
+	});
+
+	it("rejects a successful build that produced no runnable artifact", async () => {
+		const run = await runCommandScript(entries, { skipBuildArtifacts: true });
+		expect(run.status).not.toBe(0);
+		expect(run.calls.filter((call) => call.startsWith("pi-web-ui:"))).toEqual([]);
+		expect(run.checkoutExists).toBe(false);
+		expect(run.catalog).toBeUndefined();
+	});
+
+	it("leaves the previous catalog untouched when an install fails", async () => {
+		const previous = '{"entries":[{"id":"old","source":"Jensen95/pi-web-ui-plugins/plugins/old"}]}\n';
+		const run = await runCommandScript(entries, { failId: "beta", previousCatalog: previous });
+
+		expect(run.status, run.stderr).not.toBe(0);
+		expect(run.calls.filter((call) => call.startsWith("pi-web-ui:"))).toEqual([
+			"pi-web-ui:install <tmp>/checkout/plugins/alpha --name alpha --force",
+			"pi-web-ui:install <tmp>/checkout/plugins/beta --name beta --force",
 		]);
 		expect(run.catalog).toBe(previous);
 	});
