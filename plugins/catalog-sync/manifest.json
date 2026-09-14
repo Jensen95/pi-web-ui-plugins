@@ -1,0 +1,8 @@
+{
+	"id": "catalog-sync",
+	"name": "Plugin Catalog Sync",
+	"version": "0.1.0",
+	"icon": "🔄",
+	"description": "Reload this repository's custom plugin catalog and update every listed plugin through the host terminal.",
+	"view": true
+}
