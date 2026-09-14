@@ -1,0 +1,8 @@
+{
+	"id": "worktree-preparer",
+	"name": "Worktree Preparer",
+	"version": "0.1.0",
+	"icon": "🌿",
+	"description": "Assemble selected workspace folders and Git repositories into a fresh multi-project worktree folder.",
+	"permissions": ["fs", "terminal"]
+}
