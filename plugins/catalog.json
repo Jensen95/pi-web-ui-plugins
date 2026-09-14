@@ -19,7 +19,7 @@
 		"id": "catalog-sync",
 		"name": "Plugin Catalog Sync",
 		"icon": "🔄",
-		"description": "Select source-only plugins to build, install or update from a temporary checkout through the host terminal.",
+		"description": "Sync the catalog, or select source-only plugins to build, install or update from a temporary checkout.",
 		"source": "Jensen95/pi-web-ui-plugins/plugins/catalog-sync",
 		"homepage": "https://github.com/Jensen95/pi-web-ui-plugins/tree/main/plugins/catalog-sync"
 	},

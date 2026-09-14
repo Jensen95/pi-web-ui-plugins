@@ -50,8 +50,8 @@ selected source-only plugin directories from that temporary checkout. Install th
 pi-web-ui install Jensen95/pi-web-ui-plugins/plugins/catalog-sync
 ```
 
-To update or install selected catalog plugins, install `catalog-sync`, open its view, check the desired entries, and choose **Update selected plugins**.
-Entries start unchecked; its terminal command builds the repository once and installs only the selected plugins.
+To refresh the custom catalog, install `catalog-sync`, open its view, and choose **Sync catalog**; this writes the catalog without installing anything.
+To install or update plugins, check their cards and choose **Install/update selected**. Entries start unchecked.
 
 ### Custom catalogs
 
@@ -68,8 +68,8 @@ curl -fsSL https://raw.githubusercontent.com/Jensen95/pi-web-ui-plugins/main/plu
  jq '{entries: .}' > ~/.pi-web/plugin-catalog.json
 ```
 
-Refresh pi-web-ui after writing the file, then install `catalog-sync`, select the plugins you want, and use its
-**Update selected plugins** button to build and install them through the visible terminal. The release workflow remains available for tagged archives,
+Refresh pi-web-ui after writing the file, then install `catalog-sync`. Use **Sync catalog** to refresh the marketplace
+without installing plugins, or select plugin cards and use **Install/update selected** to build and install them. The release workflow remains available for tagged archives,
 but a release is not required for installation. Runtime packages for plugins that need them are installed by pi-web-ui
 on first activation via `ensureDeps`.
 

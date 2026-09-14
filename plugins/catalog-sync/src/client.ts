@@ -1,22 +1,43 @@
 /**
- * Reload the repository's custom plugin catalog through the host terminal.
+ * Manage this repository's custom plugin catalog through the host terminal.
  *
- * The plugin API has no supported catalog write or reload method, so this view
+ * The plugin API has no supported catalog-write or reload method, so this view
  * intentionally uses the private event the host already exposes for plugin
- * update buttons. The command fetches, validates and writes the custom catalog,
- * then builds and installs the selected sources with the host CLI.
+ * update buttons. Catalog sync and plugin installation stay separate actions.
  */
 
 export const CATALOG_URL = "https://raw.githubusercontent.com/Jensen95/pi-web-ui-plugins/main/plugins/catalog.json";
 export const SOURCE_REPOSITORY = "Jensen95/pi-web-ui-plugins";
 export const EVENT_NAME = "pi-web-ui:plugin-run-command";
-export const COMMAND_TITLE = "Update selected plugins";
+export const SYNC_TITLE = "Sync catalog";
+export const UPDATE_TITLE = "Install/update selected";
+/** Kept for hosts or callers that used the old exported title. */
+export const COMMAND_TITLE = UPDATE_TITLE;
 const SELF_SOURCE = `${SOURCE_REPOSITORY}/plugins/catalog-sync`;
 const SOURCE_PREFIX = `${SOURCE_REPOSITORY}/plugins/`;
 const ID_PATTERN = /^[A-Za-z0-9_-]+$/;
 
-const COMMAND_SCRIPT = (requestedIds: string[] | undefined): string => `
-const requestedIds = ${JSON.stringify(requestedIds ?? null)};
+const CATALOG_FILE_SCRIPT = `
+const fs = await import("node:fs");
+const os = await import("node:os");
+const path = await import("node:path");
+const configured = process.env.PI_WEB_DATA_DIR?.trim();
+const dataDir = configured || path.join(os.homedir(), ".pi-web");
+const writeCatalog = (catalogEntries) => {
+  fs.mkdirSync(dataDir, { recursive: true });
+  const catalogPath = path.join(dataDir, "plugin-catalog.json");
+  const temporaryPath = catalogPath + ".tmp-" + process.pid;
+  try {
+    fs.writeFileSync(temporaryPath, JSON.stringify({ entries: catalogEntries }, null, 2) + "\\n");
+    fs.renameSync(temporaryPath, catalogPath);
+  } catch (error) {
+    try { fs.unlinkSync(temporaryPath); } catch {}
+    throw error;
+  }
+};
+`;
+
+const CATALOG_SCRIPT = (body: string): string => `
 const response = await fetch(${JSON.stringify(CATALOG_URL)}, { signal: AbortSignal.timeout(30000) });
 if (!response.ok) throw new Error("catalog request failed: HTTP " + response.status);
 const entries = await response.json();
@@ -37,17 +58,24 @@ for (const entry of entries) {
   if (ids.has(id)) throw new Error("catalog contains duplicate plugin id: " + id);
   ids.add(id);
 }
+${body}
+`;
+
+const SYNC_SCRIPT = CATALOG_SCRIPT(`
+${CATALOG_FILE_SCRIPT}
+writeCatalog(entries);
+`);
+
+const UPDATE_SCRIPT = (requestedIds: string[] | undefined): string =>
+	CATALOG_SCRIPT(`
+const requestedIds = ${JSON.stringify(requestedIds ?? null)};
 const selectedIds = new Set(requestedIds ?? ids);
 if (selectedIds.size === 0) throw new Error("select at least one plugin");
 for (const id of selectedIds) {
   if (!ids.has(id)) throw new Error("selected plugin is not in the catalog: " + id);
 }
-const fs = await import("node:fs");
-const os = await import("node:os");
-const path = await import("node:path");
+${CATALOG_FILE_SCRIPT}
 const childProcess = await import("node:child_process");
-const configured = process.env.PI_WEB_DATA_DIR?.trim();
-const dataDir = configured || path.join(os.homedir(), ".pi-web");
 const npm = process.platform === "win32" ? "npm.cmd" : "npm";
 const cli = process.platform === "win32" ? "pi-web-ui.cmd" : "pi-web-ui";
 const checkout = fs.mkdtempSync(path.join(os.tmpdir(), "pi-web-ui-plugins-"));
@@ -74,30 +102,34 @@ try {
     if (!selectedIds.has(entry.id) || entry.id === "catalog-sync") continue;
     run(cli, ["install", path.join(checkout, "plugins", entry.id), "--name", entry.id, "--force"]);
   }
-
-  fs.mkdirSync(dataDir, { recursive: true });
-  const catalogPath = path.join(dataDir, "plugin-catalog.json");
-  const temporaryPath = catalogPath + ".tmp-" + process.pid;
-  try {
-    fs.writeFileSync(temporaryPath, JSON.stringify({ entries }, null, 2) + "\\n");
-    fs.renameSync(temporaryPath, catalogPath);
-  } catch (error) {
-    try { fs.unlinkSync(temporaryPath); } catch {}
-    throw error;
-  }
+  writeCatalog(entries);
 } finally {
   fs.rmSync(checkout, { recursive: true, force: true });
 }
-`;
+`);
 
-/** The visible command run by the host's terminal bridge. */
-export function reloadCommand(requestedIds?: string[]): string {
-	const encodedScript = btoa(`(async () => {${COMMAND_SCRIPT(requestedIds)}})()`);
+function nodeCommand(script: string): string {
+	const encodedScript = btoa(`(async () => {${script}})()`);
+	return `node --input-type=module -e "await eval(Buffer.from('${encodedScript}', 'base64').toString())"`;
+}
+
+/** Write the remote catalog without installing or updating any plugin. */
+export function syncCatalogCommand(): string {
+	return nodeCommand(SYNC_SCRIPT);
+}
+
+/** Build and install only the requested catalog entries. */
+export function updateSelectedCommand(requestedIds?: string[]): string {
 	const selfUpdate =
 		requestedIds === undefined || requestedIds.includes("catalog-sync")
 			? `pi-web-ui install ${SELF_SOURCE} --name catalog-sync --force && `
 			: "";
-	return `${selfUpdate}node --input-type=module -e "await eval(Buffer.from('${encodedScript}', 'base64').toString())"`;
+	return `${selfUpdate}${nodeCommand(UPDATE_SCRIPT(requestedIds))}`;
+}
+
+/** Backward-compatible alias for callers using the original command name. */
+export function reloadCommand(requestedIds?: string[]): string {
+	return updateSelectedCommand(requestedIds);
 }
 
 /** The narrow browser view contract supplied by pi-web-ui. */
@@ -113,6 +145,7 @@ interface CatalogEntry {
 	name: string;
 	icon?: string;
 	description?: string;
+	homepage?: string;
 }
 
 function parseCatalog(value: unknown): CatalogEntry[] {
@@ -139,6 +172,7 @@ function parseCatalog(value: unknown): CatalogEntry[] {
 			name: typeof entry.name === "string" && entry.name.trim() ? entry.name : id,
 			icon: typeof entry.icon === "string" ? entry.icon : undefined,
 			description: typeof entry.description === "string" ? entry.description : undefined,
+			homepage: typeof entry.homepage === "string" ? entry.homepage : undefined,
 		};
 	});
 }
@@ -149,6 +183,24 @@ async function fetchCatalog(): Promise<CatalogEntry[]> {
 	return parseCatalog(await response.json());
 }
 
+const VIEW_STYLE = `
+.catalog-sync { display: grid; gap: 14px; max-width: 760px; }
+.catalog-sync__header { display: grid; gap: 4px; }
+.catalog-sync__header h1 { margin: 0; font-size: 1.25rem; }
+.catalog-sync__header p, .catalog-sync__status { margin: 0; opacity: .75; }
+.catalog-sync__actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.catalog-sync__actions button { cursor: pointer; }
+.catalog-sync__selection { margin-left: auto; opacity: .7; font-size: .9em; }
+.catalog-sync__cards { display: grid; gap: 10px; }
+.catalog-sync__card { display: block; padding: 12px; border: 1px solid color-mix(in srgb, currentColor 22%, transparent); border-radius: 8px; }
+.catalog-sync__card > label { display: grid; grid-template-columns: auto 1fr; gap: 10px; cursor: pointer; }
+.catalog-sync__card input { margin-top: 4px; }
+.catalog-sync__body { display: grid; gap: 5px; min-width: 0; }
+.catalog-sync__body h2 { margin: 0; font-size: 1rem; }
+.catalog-sync__body p { margin: 0; opacity: .8; }
+.catalog-sync__source { overflow-wrap: anywhere; opacity: .65; font-size: .85em; }
+`;
+
 function setStatus(status: HTMLElement, text: string): void {
 	status.textContent = text;
 }
@@ -156,67 +208,135 @@ function setStatus(status: HTMLElement, text: string): void {
 const clientEntry = {
 	mount(container: HTMLElement): () => void {
 		const document = container.ownerDocument;
-		const button = document.createElement("button");
-		button.type = "button";
-		button.textContent = COMMAND_TITLE;
-		button.disabled = true;
+		const root = document.createElement("section");
+		root.className = "catalog-sync";
+		const style = document.createElement("style");
+		style.textContent = VIEW_STYLE;
+
+		const header = document.createElement("header");
+		header.className = "catalog-sync__header";
+		const heading = document.createElement("h1");
+		heading.textContent = "Plugin catalog";
+		const intro = document.createElement("p");
+		intro.textContent = "Sync the catalog separately, or install and update the plugins you choose.";
+		header.append(heading, intro);
+
+		const actions = document.createElement("div");
+		actions.className = "catalog-sync__actions";
+		const syncButton = document.createElement("button");
+		syncButton.type = "button";
+		syncButton.textContent = SYNC_TITLE;
+		syncButton.disabled = true;
+		const updateButton = document.createElement("button");
+		updateButton.type = "button";
+		updateButton.textContent = UPDATE_TITLE;
+		updateButton.disabled = true;
+		const selection = document.createElement("span");
+		selection.className = "catalog-sync__selection";
+		selection.textContent = "0 selected";
+		actions.append(syncButton, updateButton, selection);
 
 		const status = document.createElement("p");
+		status.className = "catalog-sync__status";
 		status.textContent = "Loading plugin catalog…";
-
-		const list = document.createElement("fieldset");
-		const legend = document.createElement("legend");
-		legend.textContent = "Select plugins to update or install";
-		list.append(legend);
+		const cards = document.createElement("div");
+		cards.className = "catalog-sync__cards";
 		const checkboxes: HTMLInputElement[] = [];
+		const checkboxCleanups: Array<() => void> = [];
+		const selectedIds = new Set<string>();
+		let entries: CatalogEntry[] = [];
+		let loaded = false;
 		let disposed = false;
 
-		const onClick = (): void => {
-			const selectedIds = checkboxes.filter((checkbox) => checkbox.checked).map((checkbox) => checkbox.value);
-			if (selectedIds.length === 0) {
-				setStatus(status, "Select at least one plugin.");
-				return;
-			}
+		const updateSelection = (): void => {
+			selection.textContent = `${selectedIds.size} selected`;
+			updateButton.disabled = !loaded || selectedIds.size === 0;
+		};
+
+		const sendCommand = (title: string, command: string, success: string): void => {
 			const view = document.defaultView;
 			if (!view || typeof view.dispatchEvent !== "function") {
 				setStatus(status, "The terminal bridge is unavailable.");
 				return;
 			}
 			try {
-				view.dispatchEvent(
-					new CustomEvent(EVENT_NAME, {
-						detail: { title: COMMAND_TITLE, command: reloadCommand(selectedIds) },
-					}),
-				);
-				setStatus(status, "Update request sent to the terminal.");
+				view.dispatchEvent(new CustomEvent(EVENT_NAME, { detail: { title, command } }));
+				setStatus(status, success);
 			} catch {
-				setStatus(status, "Could not start the update command.");
+				setStatus(status, "Could not start the terminal command.");
 			}
 		};
 
-		button.addEventListener("click", onClick);
-		container.append(button, status, list);
+		const onSync = (): void => {
+			if (!loaded) return;
+			sendCommand(SYNC_TITLE, syncCatalogCommand(), "Catalog sync request sent to the terminal.");
+		};
+		const onUpdate = (): void => {
+			if (selectedIds.size === 0) {
+				setStatus(status, "Select at least one plugin.");
+				return;
+			}
+			const requestedIds = entries.filter((entry) => selectedIds.has(entry.id)).map((entry) => entry.id);
+			sendCommand(UPDATE_TITLE, updateSelectedCommand(requestedIds), "Install/update request sent to the terminal.");
+		};
+
+		syncButton.addEventListener("click", onSync);
+		updateButton.addEventListener("click", onUpdate);
+		root.append(style, header, actions, status, cards);
+		container.append(root);
+
 		void fetchCatalog()
-			.then((entries) => {
+			.then((loadedEntries) => {
 				if (disposed) return;
+				entries = loadedEntries;
 				for (const entry of entries) {
+					const card = document.createElement("article");
+					card.className = "catalog-sync__card";
 					const label = document.createElement("label");
 					const checkbox = document.createElement("input");
 					checkbox.type = "checkbox";
 					checkbox.value = entry.id;
-					const title = document.createElement("span");
-					title.textContent = `${entry.icon ? `${entry.icon} ` : ""}${entry.name} (${entry.id})`;
-					label.append(checkbox, title);
-					if (entry.description) {
-						const description = document.createElement("span");
-						description.textContent = ` — ${entry.description}`;
-						label.append(description);
+					const body = document.createElement("div");
+					body.className = "catalog-sync__body";
+					if (entry.icon) {
+						const icon = document.createElement("span");
+						icon.textContent = entry.icon;
+						body.append(icon);
 					}
-					list.append(label);
+					const title = document.createElement("h2");
+					title.textContent = entry.name;
+					const id = document.createElement("code");
+					id.textContent = entry.id;
+					const description = document.createElement("p");
+					description.textContent = entry.description ?? "No description provided.";
+					const source = document.createElement("code");
+					source.className = "catalog-sync__source";
+					source.textContent = entry.source;
+					body.append(title, id, description, source);
+					if (entry.homepage) {
+						const homepage = document.createElement("a");
+						homepage.href = entry.homepage;
+						homepage.target = "_blank";
+						homepage.rel = "noreferrer";
+						homepage.textContent = "Repository";
+						body.append(homepage);
+					}
+					label.append(checkbox, body);
+					card.append(label);
+					cards.append(card);
 					checkboxes.push(checkbox);
+					const onCheckbox = (): void => {
+						if (checkbox.checked) selectedIds.add(entry.id);
+						else selectedIds.delete(entry.id);
+						updateSelection();
+					};
+					checkbox.addEventListener("click", onCheckbox);
+					checkboxCleanups.push(() => checkbox.removeEventListener("click", onCheckbox));
 				}
-				button.disabled = false;
-				setStatus(status, "Select one or more plugins, then update.");
+				loaded = true;
+				syncButton.disabled = false;
+				updateSelection();
+				setStatus(status, "Catalog loaded. Choose an action.");
 			})
 			.catch(() => {
 				if (disposed) return;
@@ -225,7 +345,9 @@ const clientEntry = {
 
 		return () => {
 			disposed = true;
-			button.removeEventListener("click", onClick);
+			syncButton.removeEventListener("click", onSync);
+			updateButton.removeEventListener("click", onUpdate);
+			for (const cleanup of checkboxCleanups) cleanup();
 			container.replaceChildren();
 		};
 	},
