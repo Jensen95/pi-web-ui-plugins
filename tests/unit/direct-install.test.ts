@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { isGitIgnored, pluginIds, repoPath } from "../helpers/repo-files";
 
@@ -11,44 +11,25 @@ function trackedFiles(): Set<string> {
 	);
 }
 
-function filesUnder(rel: string): string[] {
-	const root = repoPath(rel);
-	if (!existsSync(root)) return [];
-	const files: string[] = [];
-	const visit = (dir: string): void => {
-		for (const entry of readdirSync(dir, { withFileTypes: true })) {
-			const full = `${dir}/${entry.name}`;
-			if (entry.isDirectory()) visit(full);
-			else if (entry.isFile()) files.push(full.slice(repoPath().length + 1).replaceAll("\\", "/"));
-		}
-	};
-	visit(root);
-	return files.sort();
-}
-
 describe("direct GitHub install payload", () => {
-	it("tracks every compiled entry required by every catalog plugin", () => {
+	it("tracks only the bootstrap entry; catalog-sync builds source-only plugins first", () => {
 		const tracked = trackedFiles();
-		const missing: string[] = [];
-		for (const id of pluginIds()) {
-			for (const [source, artifact] of [
-				[`plugins/${id}/src/index.ts`, `plugins/${id}/index.mjs`],
-				[`plugins/${id}/src/client.ts`, `plugins/${id}/client/entry.mjs`],
-			] as const) {
-				if (!existsSync(repoPath(source))) continue;
-				if (!existsSync(repoPath(artifact))) missing.push(`${artifact} is missing`);
-				if (!tracked.has(artifact)) missing.push(`${artifact} is not tracked`);
-				if (isGitIgnored(artifact)) missing.push(`${artifact} is gitignored`);
+		const client = "plugins/catalog-sync/client/entry.mjs";
+		expect(existsSync(repoPath(client))).toBe(true);
+		expect(tracked.has(client)).toBe(true);
+		expect(isGitIgnored(client)).toBe(false);
+
+		for (const id of pluginIds().filter((id) => id !== "catalog-sync")) {
+			for (const artifact of [`plugins/${id}/index.mjs`, `plugins/${id}/client/entry.mjs`]) {
+				expect(isGitIgnored(artifact), `${artifact} is build output`).toBe(true);
+				expect(tracked.has(artifact), `${artifact} must not be committed`).toBe(false);
 			}
 		}
-		expect(missing, missing.join("\n")).toEqual([]);
 	});
 
-	it("tracks every vendored browser asset required by a plugin", () => {
-		const tracked = trackedFiles();
-		const vendorFiles = pluginIds().flatMap((id) => filesUnder(`plugins/${id}/client/vendor`));
-		expect(vendorFiles.length, "the install payload should include any required vendor assets").toBeGreaterThan(0);
-		const missing = vendorFiles.filter((file) => !tracked.has(file) || isGitIgnored(file));
-		expect(missing, `vendor assets are not directly installable:\n${missing.join("\n")}`).toEqual([]);
+	it("does not require vendored browser assets in the direct install payload", () => {
+		for (const id of pluginIds().filter((id) => id !== "catalog-sync")) {
+			expect(isGitIgnored(`plugins/${id}/client/vendor/anything.bundle.mjs`)).toBe(true);
+		}
 	});
 });

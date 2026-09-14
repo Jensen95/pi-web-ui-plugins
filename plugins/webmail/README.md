@@ -28,21 +28,20 @@ Passwords are stored first in the host’s encrypted secret facility (`host.secr
 ## Install, uninstall, and update
 
 ```bash
-# ── Install ──
-pi-web-ui install https://github.com/xing-shuyin/pi-web-ui/tree/main/plugins/webmail
-pi-web-ui install plugins/webmail        # or a local directory for development
+# ── Install source-only catalog plugins ──
+pi-web-ui install Jensen95/pi-web-ui-plugins/plugins/catalog-sync
+# Open catalog-sync and choose "Reload custom plugins"
+# Local development: build this plugin before installing its directory
+npm run build:webmail
+pi-web-ui install plugins/webmail
 # Optional: --data-dir <dir> chooses the data directory; default: ~/.pi-web
 
 # ── Inspect ──
 pi-web-ui plugins                            # lists installed plugins and IDs
 
 # ── Update ──
-pi-web-ui install https://github.com/xing-shuyin/pi-web-ui/tree/main/plugins/webmail --force
-                                             # --force reinstalls over the current copy
-                                             # Back up config.json in the plugin directory first
-
-cp -r plugins/webmail ~/.pi-web/plugins/ # local development: copy over the installed plugin
-                                             # Windows: %USERPROFILE%\.pi-web\plugins\webmail
+# Use catalog-sync to rebuild and reinstall all catalog plugins.
+# Back up config.json in the plugin directory first
 
 # ── Uninstall ──
 pi-web-ui uninstall webmail                  # removes the plugin directory and config.json

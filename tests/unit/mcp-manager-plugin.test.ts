@@ -438,7 +438,7 @@ describe("build artifacts", () => {
 		expect(result.serverEntry).toBe(repoPath("plugins", PLUGIN_ID, "index.mjs"));
 		expect(result.clientEntry).toBe(repoPath("plugins", PLUGIN_ID, "client", "entry.mjs"));
 		for (const artifact of result.artifacts)
-			expect(isGitIgnored(artifact), `${artifact} must be trackable`).toBe(false);
+			expect(isGitIgnored(artifact), `${artifact} is built by catalog-sync`).toBe(true);
 	});
 
 	it("compiles a server entry the host can activate", async () => {

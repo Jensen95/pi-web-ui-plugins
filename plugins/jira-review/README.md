@@ -17,10 +17,11 @@ draft comment and then adds the `dogits-dans-le-nez` Jira label.
 
 ## Setup
 
-Install the plugin directly:
+Install it with `catalog-sync`, which builds this source-only plugin before handing it to pi-web-ui. For local development:
 
 ```sh
-pi-web-ui install Jensen95/pi-web-ui-plugins/plugins/jira-review
+npm run build:jira-review
+pi-web-ui install plugins/jira-review
 ```
 
 In the plugin view, enter the Jira Cloud site URL, account email, API token, board ID, and ready-ticket JQL. The API

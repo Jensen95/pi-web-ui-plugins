@@ -8,7 +8,7 @@
  *     directions, so the marketplace list cannot silently drift
  *   - permission strings use families the host actually recognises, and every
  *     gated host API a plugin calls has its family declared
- *   - the TypeScript layout and tracked runtime artifacts stay consistent, and
+ *   - the TypeScript layout and bootstrap/runtime artifact policy stay consistent, and
  *     every generated entry can be rebuilt from a committed source
  *   - the toolchain is really TypeScript 7
  *   - no plugin reaches outside its own directory, which is what makes
@@ -24,7 +24,7 @@ import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { CJK_RE, findCjk, formatCjkHits, isGitIgnored, pluginIds, repoPath } from "../helpers/repo-files";
 
-/** The eleven plugins this repo ships, and the artifacts each one must compile to. */
+/** The eleven plugins this repo ships, and the source entries each one must compile to. */
 const EXPECTED_ARTIFACTS: Record<string, { server: boolean; client: boolean }> = {
 	"catalog-sync": { server: false, client: true },
 	"db-client": { server: true, client: true },
@@ -351,36 +351,33 @@ describe("TypeScript layout", () => {
 		expect(obsolete, `dependencies live in the root package.json:\n${obsolete.join("\n")}`).toEqual([]);
 	});
 
-	it("tracks every generated asset required by direct installs", () => {
+	it("commits only the bootstrap artifact required for the first install", () => {
 		const tracked = gitFilesCached();
-		const generated = filesUnder("plugins").filter((file) => /^plugins\/[^/]+\/(index\.mjs|client\/)/.test(file));
-		const unavailable = generated.filter((file) => !tracked.includes(file) || isGitIgnored(file));
-		expect(unavailable, `generated output is not directly installable:\n${unavailable.join("\n")}`).toEqual([]);
+		const bootstrap = "plugins/catalog-sync/client/entry.mjs";
+		const generated = tracked.filter((file) =>
+			/^plugins\/[^/]+\/(?:index\.mjs|client\/entry\.mjs|client\/vendor\/)/.test(file),
+		);
+		const unexpected = generated.filter((file) => !file.startsWith("plugins/catalog-sync/"));
+		expect(tracked).toContain(bootstrap);
+		expect(isGitIgnored(bootstrap)).toBe(false);
+		expect(unexpected, `source-only output must not be committed:\n${unexpected.join("\n")}`).toEqual([]);
 	});
 });
 
 describe("compiled artifacts", () => {
-	it("exist on disk for every plugin (run npm run build)", () => {
-		const problems: string[] = [];
-		for (const id of EXPECTED_IDS) {
-			const expected = EXPECTED_ARTIFACTS[id]!;
-			if (expected.server && !existsSync(repoPath(`plugins/${id}/index.mjs`))) {
-				problems.push(`plugins/${id}/index.mjs is missing`);
-			}
-			if (expected.client && !existsSync(repoPath(`plugins/${id}/client/entry.mjs`))) {
-				problems.push(`plugins/${id}/client/entry.mjs is missing`);
-			}
-		}
-		// The other half of "nothing compiled is tracked": a gitignore that hides a
-		// plugin which was never built is indistinguishable from a clean repo.
-		expect(problems, `build output missing (npm run build):\n${problems.join("\n")}`).toEqual([]);
+	it("keeps the bootstrap client entry available for the first install", () => {
+		const artifact = "plugins/catalog-sync/client/entry.mjs";
+		expect(existsSync(repoPath(artifact))).toBe(true);
+		expect(isGitIgnored(artifact)).toBe(false);
 	});
 
-	it("keeps every compiled entry available to direct installs", () => {
-		for (const [id, expected] of Object.entries(EXPECTED_ARTIFACTS)) {
-			if (expected.server) expect(isGitIgnored(`plugins/${id}/index.mjs`)).toBe(false);
-			if (expected.client) expect(isGitIgnored(`plugins/${id}/client/entry.mjs`)).toBe(false);
-		}
+	it("keeps source-only compiled entries out of the committed payload", () => {
+		const tracked = gitFilesCached();
+		const generated = tracked.filter((file) =>
+			/^plugins\/[^/]+\/(?:index\.mjs|client\/entry\.mjs|client\/vendor\/)/.test(file),
+		);
+		const sourceOnly = generated.filter((file) => !file.startsWith("plugins/catalog-sync/"));
+		expect(sourceOnly, `source-only output must be ignored:\n${sourceOnly.join("\n")}`).toEqual([]);
 	});
 
 	it("are regenerable from committed sources alone", () => {
@@ -506,8 +503,9 @@ describe("licence and attribution", () => {
 
 	it("states the direct GitHub install story in the README", () => {
 		const readme = readFileSync(repoPath("README.md"), "utf8");
-		expect(readme).toContain("pi-web-ui install Jensen95/pi-web-ui-plugins/plugins/image-toolkit");
-		expect(readme).toMatch(/intentionally tracked/i);
+		expect(readme).toContain("pi-web-ui install Jensen95/pi-web-ui-plugins/plugins/catalog-sync");
+		expect(readme).toMatch(/source-only/i);
+		expect(readme).toMatch(/temporary checkout/i);
 		expect(readme).toMatch(/release workflow/i);
 		expect(readme).toMatch(/English-only/i);
 	});

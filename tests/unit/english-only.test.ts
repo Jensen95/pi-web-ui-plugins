@@ -6,9 +6,9 @@
  * messages, JSON, YAML, README, workflows, build scripts and the compiled output
  * those produce.
  *
- * Two passes keep the compiled-entry check explicit even though those files are
- * tracked: the repo-wide pass and the compiled-entry pass have different CJK
- * policies for bundled browser dependencies.
+ * Two passes keep the compiled-entry check explicit: the repo-wide pass covers
+ * committed files, while the compiled-entry pass also checks build output that
+ * catalog-sync creates in its temporary checkout.
  *   1. every file git tracks or would track (repoFiles)
  *   2. every compiled plugin entry that exists (listCompiledEntries)
  * Third-party vendor output is the only exclusion.
@@ -74,12 +74,11 @@ describe("English-only invariant", () => {
 		expect(isVendorPath("plugins/mermaid/manifest.json")).toBe(false);
 	});
 
-	it("includes every compiled entry in the tracked-file pass", () => {
-		const built = listCompiledEntries();
+	it("includes every non-ignored compiled entry in the tracked-file pass", () => {
+		const built = listCompiledEntries().filter((entry) => !isGitIgnored(entry));
 		const tracked = repoFiles();
-		expect(built.length).toBeGreaterThan(0);
+		expect(built).toContain("plugins/catalog-sync/client/entry.mjs");
 		for (const entry of built) {
-			expect(isGitIgnored(entry), `${entry} must be trackable`).toBe(false);
 			expect(tracked, `${entry} is absent from the repo file pass`).toContain(entry);
 		}
 	});

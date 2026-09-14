@@ -11,7 +11,7 @@ These are English-only TypeScript ports of the upstream plugins. See
 
 | id                  | icon | What it does                                                                                                                 | Permissions                               |
 | ------------------- | ---- | ---------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
-| `catalog-sync`      | 🔄   | Reloads this repository's custom plugin catalog and updates every listed plugin through the host terminal.                   | none                                      |
+| `catalog-sync`      | 🔄   | Builds this repository's source-only plugins in a temporary checkout, then reloads and installs its custom catalog.          | none                                      |
 | `jira-review`       | 🎟️   | Reviews active Jira Cloud sprint tickets, saves agent-readiness scores, and manually posts approved notes.                   | `fs`, `net`, `tools`                      |
 | `webmail`           | 📬   | IMAP inbox, SMTP sending and new-mail notifications, with an optional switch that lets the agent manage the mailbox.         | `net:imap/smtp`, `tools`                  |
 | `db-client`         | 🗄️   | Schema browsing, SQL queries and row editing across MySQL, PostgreSQL, SQLite, SQL Server, MongoDB and Redis.                | `net`, `tools`                            |
@@ -43,36 +43,22 @@ Load `plugins/page-picker/extension/` as an unpacked extension after building (o
 
 ## Installing plugins
 
-Compiled runtime entries are intentionally tracked, so the normal GitHub install works directly without
-downloading an archive or running a build. Install one plugin with its repository subdirectory:
+`catalog-sync` is the tracked bootstrap entry. It clones this repository, runs the shared build once, and installs the
+source-only plugin directories from that temporary checkout. Install the bootstrap with its repository subdirectory:
 
 ```sh
 pi-web-ui install Jensen95/pi-web-ui-plugins/plugins/catalog-sync
-pi-web-ui install Jensen95/pi-web-ui-plugins/plugins/db-client
-pi-web-ui install Jensen95/pi-web-ui-plugins/plugins/image-toolkit
-pi-web-ui install Jensen95/pi-web-ui-plugins/plugins/jira-review
-pi-web-ui install Jensen95/pi-web-ui-plugins/plugins/mcp-manager
-pi-web-ui install Jensen95/pi-web-ui-plugins/plugins/mermaid
-pi-web-ui install Jensen95/pi-web-ui-plugins/plugins/run-trace
-pi-web-ui install Jensen95/pi-web-ui-plugins/plugins/ui-shortcuts
-pi-web-ui install Jensen95/pi-web-ui-plugins/plugins/vscode-editor
-pi-web-ui install Jensen95/pi-web-ui-plugins/plugins/webmail
-pi-web-ui install Jensen95/pi-web-ui-plugins/plugins/worktree-preparer
 ```
 
-To install every plugin in the catalog at once:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/Jensen95/pi-web-ui-plugins/main/plugins/catalog.json |
- jq -r '.[].source' |
- while IFS= read -r source; do pi-web-ui install "$source"; done
-```
+To install every plugin in the catalog at once, install `catalog-sync`, open its view, and choose **Reload custom plugins**.
+Its terminal command builds all source-only plugins before installing them.
 
 ### Custom catalogs
 
 Recent pi-web-ui versions support custom catalog entries. Open **Settings → UI plugins → Plugin marketplace →
 Add plugin** and enter a source such as `Jensen95/pi-web-ui-plugins/plugins/image-toolkit`. Entries are stored
 in `~/.pi-web/plugin-catalog.json` (or `<dataDir>/plugin-catalog.json`) and appear alongside the built-in catalog.
+For this source-only repository, install `catalog-sync` and use its reload button instead of installing a listed source directly.
 
 To load this repository's complete catalog as a custom catalog:
 
@@ -82,10 +68,10 @@ curl -fsSL https://raw.githubusercontent.com/Jensen95/pi-web-ui-plugins/main/plu
  jq '{entries: .}' > ~/.pi-web/plugin-catalog.json
 ```
 
-Refresh pi-web-ui after writing the file. Alternatively, install `catalog-sync` and use its **Reload custom plugins**
-button to fetch and install every source through the visible terminal. The release workflow remains available for tagged
-archives, but a release is not required for installation. Runtime packages for plugins that need them are installed by
-pi-web-ui on first activation via `ensureDeps`.
+Refresh pi-web-ui after writing the file, then install `catalog-sync` and use its **Reload custom plugins** button to
+build and install every source through the visible terminal. The release workflow remains available for tagged archives,
+but a release is not required for installation. Runtime packages for plugins that need them are installed by pi-web-ui
+on first activation via `ensureDeps`.
 
 ## Development
 
@@ -102,7 +88,7 @@ npm run typecheck        # tsc --noEmit, strict, over plugin and extension TypeS
 npm run lint             # oxlint over plugins/, scripts/, tests/
 npm run check:english    # fail on any CJK character in the repo or its artifacts
 npm run format           # prettier --write (tabs, printWidth 120)
-npm run clean            # remove artifacts that are rebuildable from committed sources
+npm run clean            # remove generated plugin entries and vendor bundles
 ```
 
 CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs them in this order on every push to `main`
@@ -136,13 +122,14 @@ plugins/<id>/
     index.ts           committed  - server entry source (only if it has server logic)
     client.ts          committed  - browser view or renderer source
     <anything>.ts      committed  - helper modules, inlined by the build
-  index.mjs            GENERATED  - tracked, from src/index.ts
-  client/entry.mjs     GENERATED  - tracked, from src/client.ts
-  client/vendor/*      GENERATED  - tracked, third-party bundles
+  index.mjs            GENERATED  - ignored, from src/index.ts
+  client/entry.mjs     GENERATED  - ignored, from src/client.ts
+  client/vendor/*      GENERATED  - ignored, third-party bundles
 ```
 
-All runnable entries and required browser/vendor modules for catalog plugins are tracked so every GitHub subdirectory install works
-without downloading an archive or running a build. The Page Picker extension is built separately from its TypeScript sources.
+`plugins/catalog-sync/client/entry.mjs` is the one tracked bootstrap exception. Its reload command clones the repository,
+runs `npm ci` and `npm run build`, then installs the generated local directories. The Page Picker extension is built
+separately from its TypeScript sources.
 
 `scripts/build-plugins.mjs` is convention-driven: one shared builder walks `plugins/*/`, and there are no
 per-plugin build files or `package.json` files. Server bundles keep npm specifiers external

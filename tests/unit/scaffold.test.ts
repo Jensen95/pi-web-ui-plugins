@@ -283,12 +283,13 @@ describe("English-only gate", () => {
 });
 
 describe("gitignore boundary", () => {
-	it("keeps runnable plugin artifacts trackable", () => {
+	it("tracks only the bootstrap artifact; catalog plugins build the rest before install", () => {
 		for (const id of EXPECTED_PLUGIN_IDS) {
 			const { server, client } = artifactRelPaths(id);
-			expect(isGitIgnored(server), `${server} must be installable from GitHub`).toBe(false);
-			expect(isGitIgnored(client), `${client} must be installable from GitHub`).toBe(false);
-			expect(isGitIgnored(`plugins/${id}/client/vendor/anything.bundle.mjs`)).toBe(false);
+			const bootstrap = id === "catalog-sync";
+			expect(isGitIgnored(server), `${server} build output`).toBe(true);
+			expect(isGitIgnored(client), `${client} bootstrap policy`).toBe(!bootstrap);
+			expect(isGitIgnored(`plugins/${id}/client/vendor/anything.bundle.mjs`)).toBe(true);
 			expect(isGitIgnored(`plugins/${id}/node_modules/x/index.js`), `${id} node_modules`).toBe(true);
 			expect(isGitIgnored(`plugins/${id}/storage/state.json`), `${id} runtime storage`).toBe(true);
 		}

@@ -38,23 +38,20 @@ vscode-editor/
 ## Install, uninstall, and update
 
 ```bash
-# ── Install ──
-pi-web-ui install https://github.com/xing-shuyin/pi-web-ui/tree/main/plugins/vscode-editor
-pi-web-ui install plugins/vscode-editor  # or a local directory for development
+# ── Install source-only catalog plugins ──
+pi-web-ui install Jensen95/pi-web-ui-plugins/plugins/catalog-sync
+# Open catalog-sync and choose "Reload custom plugins"
+# Local development: build this plugin before installing its directory
+npm run build:vscode-editor
+pi-web-ui install plugins/vscode-editor
 # Optional: --data-dir <dir> chooses the data directory; default: ~/.pi-web
 
 # ── Inspect ──
 pi-web-ui plugins                            # lists installed plugins and IDs
 
 # ── Update ──
-pi-web-ui install https://github.com/xing-shuyin/pi-web-ui/tree/main/plugins/vscode-editor --force
-                                             # --force reinstalls over the current copy
-                                             # Back up ssh-hosts.json and the workspace .vscode/sftp.json first
-
-cp -r plugins/vscode-editor ~/.pi-web/plugins/  # local development: build after changing src, then copy
-                                             # Windows: %USERPROFILE%\.pi-web\plugins\vscode-editor
-                                             # Only manifest.json, index.mjs, and client/ are required;
-                                             # node_modules, src, and build.mjs are not copied
+# Use catalog-sync to rebuild and reinstall all catalog plugins.
+# Back up ssh-hosts.json and the workspace .vscode/sftp.json first
 
 # ── Uninstall ──
 pi-web-ui uninstall vscode-editor            # removes the plugin directory and ssh-hosts.json

@@ -18,21 +18,19 @@ Driver dependencies are **not bundled**. First activation installs them into the
 ## Install, update, and uninstall
 
 ```bash
-# Install
-pi-web-ui install https://github.com/xing-shuyin/pi-web-ui/tree/main/plugins/db-client
-pi-web-ui install plugins/db-client      # local directory for development
+# Install all source-only catalog plugins
+pi-web-ui install Jensen95/pi-web-ui-plugins/plugins/catalog-sync
+# Open catalog-sync and choose "Reload custom plugins"
+# Local development: build this plugin before installing its directory
+npm run build:db-client
+pi-web-ui install plugins/db-client
 # Optional: --data-dir <dir> selects a data directory (default: ~/.pi-web)
 
 # Inspect installed plugins
 pi-web-ui plugins
 
-# Update
-pi-web-ui install https://github.com/xing-shuyin/pi-web-ui/tree/main/plugins/db-client --force
+# Update all catalog plugins with catalog-sync, or rebuild and reinstall locally.
 # Back up db-connections.json in the plugin directory first.
-
-# Local development: build before copying the plugin.
-cp -r plugins/db-client ~/.pi-web/plugins/
-# Windows: %USERPROFILE%\.pi-web\plugins\db-client
 
 # Uninstall (also deletes db-connections.json)
 pi-web-ui uninstall db-client

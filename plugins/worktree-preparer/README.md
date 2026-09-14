@@ -14,10 +14,11 @@ project-session switching is proposed in upstream issue [#146](https://github.co
 
 ## Setup
 
-Install it directly:
+Install it with `catalog-sync`, which builds this source-only plugin before handing it to pi-web-ui. For local development:
 
 ```sh
-pi-web-ui install Jensen95/pi-web-ui-plugins/plugins/worktree-preparer
+npm run build:worktree-preparer
+pi-web-ui install plugins/worktree-preparer
 ```
 
 Open the plugin in the current workspace, select folders, enter an output path inside that workspace and a branch name,

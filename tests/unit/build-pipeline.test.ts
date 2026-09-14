@@ -15,6 +15,7 @@ import { listPlugins } from "../helpers/plugin-contract";
 import { REPO_ROOT, isGitIgnored, repoPath } from "../helpers/repo-files";
 
 const BUILD_SCRIPTS = ["build-plugins.mjs", "build-mermaid-vendor.mjs", "build-runtrace-vendor.mjs"];
+const BOOTSTRAP_ARTIFACT_PREFIX = "plugins/catalog-sync/";
 
 /** Read once: no test adds or removes a plugin directory. */
 const plugins = listPlugins();
@@ -137,7 +138,7 @@ describe("full build run", () => {
 		}
 	});
 
-	it("rebuilds committed artifacts without dirtying the checkout", () => {
+	it("rebuilds generated artifacts without dirtying the checkout", () => {
 		const isGenerated = (path: string) =>
 			/^plugins\/[^/]+\/index\.mjs$/.test(path) ||
 			/^plugins\/[^/]+\/client\/entry\.mjs$/.test(path) ||
@@ -165,7 +166,9 @@ describe("per-plugin build", () => {
 		}
 		// Every artifact it reports is part of the direct-install payload.
 		for (const artifact of result.artifacts) {
-			expect(isGitIgnored(artifact), `${artifact} must be trackable for direct installs`).toBe(false);
+			expect(isGitIgnored(artifact), `${artifact} bootstrap policy`).toBe(
+				!artifact.startsWith(BOOTSTRAP_ARTIFACT_PREFIX),
+			);
 		}
 	});
 
@@ -174,10 +177,10 @@ describe("per-plugin build", () => {
 			const { server, client } = artifactRelPaths(plugin.dirName);
 			expect(server).toBe(`plugins/${plugin.dirName}/index.mjs`);
 			expect(client).toBe(`plugins/${plugin.dirName}/client/entry.mjs`);
-			// Those are exactly the filenames the host hardcodes, so every plugin's
-			// direct-install payload must keep them trackable.
-			expect(isGitIgnored(server)).toBe(false);
-			expect(isGitIgnored(client)).toBe(false);
+			// The bootstrap entry is tracked; catalog-sync builds every other plugin
+			// before handing its local directory to the host installer.
+			expect(isGitIgnored(server)).toBe(true);
+			expect(isGitIgnored(client)).toBe(!client.startsWith(BOOTSTRAP_ARTIFACT_PREFIX));
 		}
 	});
 
@@ -210,7 +213,9 @@ describe("per-plugin build", () => {
 			// The host hardcodes these filenames, so a rebuild must not move them.
 			expect(second.artifacts).toEqual(paths);
 			for (const artifact of paths) {
-				expect(isGitIgnored(artifact), `${artifact} must be trackable for direct installs`).toBe(false);
+				expect(isGitIgnored(artifact), `${artifact} bootstrap policy`).toBe(
+					!artifact.startsWith(BOOTSTRAP_ARTIFACT_PREFIX),
+				);
 			}
 		},
 	);

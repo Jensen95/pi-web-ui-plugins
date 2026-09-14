@@ -21,6 +21,11 @@ plugins/*/storage/
 # ---------------------------------------------------------------------------
 # Generated plugin artifacts.
 #
-# Compiled entries and vendored browser assets are tracked because the normal
-# GitHub subdirectory installer needs a runnable plugin without a local build.
+# catalog-sync is the tracked bootstrap; it clones this repo, builds it and
+# installs the generated plugin directories. Keep every other build output out
+# of source-only plugin directories and release commits.
 # ---------------------------------------------------------------------------
+plugins/*/index.mjs
+plugins/*/client/entry.mjs
+plugins/*/client/vendor/
+!plugins/catalog-sync/client/entry.mjs

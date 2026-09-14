@@ -45,7 +45,7 @@ describe("vscode-editor client build", () => {
 	it("compiles src/client.ts to the path the browser imports", () => {
 		expect(build.ok, `build failed:\n${build.stderr}\n${build.stdout}`).toBe(true);
 		expect(build.clientEntry, "client/entry.mjs was not produced").toBeDefined();
-		expect(isGitIgnored(CLIENT_ARTIFACT), "the artifact must be trackable for direct installs").toBe(false);
+		expect(isGitIgnored(CLIENT_ARTIFACT), "catalog-sync builds this artifact before install").toBe(true);
 		expect(bundle).toContain(`from plugins/${PLUGIN_ID}/src/client.ts`);
 	});
 

@@ -2,8 +2,6 @@ import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { repoPath } from "../helpers/repo-files";
 
-const PLUGIN_IDS = ["db-client", "image-toolkit", "mcp-manager", "mermaid", "run-trace", "vscode-editor", "webmail"];
-
 function read(rel: string): string {
 	return readFileSync(repoPath(rel), "utf8");
 }
@@ -21,11 +19,11 @@ describe("image-toolkit distribution", () => {
 		expect(manifest).not.toHaveProperty("descriptionEn");
 	});
 
-	it("documents direct installation for every plugin", () => {
+	it("documents the bootstrap install and source-only catalog workflow", () => {
 		const readme = read("README.md");
-		for (const id of PLUGIN_IDS) {
-			expect(readme).toContain(`pi-web-ui install Jensen95/pi-web-ui-plugins/plugins/${id}`);
-		}
+		expect(readme).toContain("pi-web-ui install Jensen95/pi-web-ui-plugins/plugins/catalog-sync");
+		expect(readme).toContain("source-only");
+		expect(readme).toContain("temporary checkout");
 		expect(readme).not.toContain("DOES NOT WORK");
 	});
 

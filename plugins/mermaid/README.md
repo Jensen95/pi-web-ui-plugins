@@ -17,8 +17,8 @@ npm run build:mermaid          # -> plugins/mermaid/client/entry.mjs + client/ve
 
 # then either copy the built directory into the pi-web-ui data directory
 cp -r plugins/mermaid "<dataDir>/plugins/mermaid"
-# or point the CLI at a source that ships built artifacts
-pi-web-ui install <owner>/<repo>/plugins/mermaid
+# or install catalog-sync to build and install all source-only catalog plugins
+pi-web-ui install Jensen95/pi-web-ui-plugins/plugins/catalog-sync
 ```
 
 Refresh the page; the plugin shows up under "Interface plugins" in the top bar / settings
