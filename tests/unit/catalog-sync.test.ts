@@ -389,6 +389,8 @@ describe("catalog-sync view", () => {
 		);
 		expect(command).toContain("node --input-type=module");
 		const script = decodeCommandScript(command);
+		expect(command).toContain('await eval(Buffer.from(');
+		expect(script).toMatch(/^\(async \(\) => \{/);
 		expect(script).toContain(CATALOG_URL);
 		expect(script).toContain("plugin-catalog.json");
 		expect(container.children[1]?.textContent).toBe("Reload request sent to the terminal.");

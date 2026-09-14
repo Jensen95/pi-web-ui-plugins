@@ -84,8 +84,8 @@ try {
 
 /** The visible command run by the host's terminal bridge. */
 export function reloadCommand(): string {
-	const encodedScript = btoa(COMMAND_SCRIPT);
-	return `pi-web-ui install ${SELF_SOURCE} --name catalog-sync --force && node --input-type=module -e "eval(Buffer.from('${encodedScript}', 'base64').toString())"`;
+	const encodedScript = btoa(`(async () => {${COMMAND_SCRIPT}})()`);
+	return `pi-web-ui install ${SELF_SOURCE} --name catalog-sync --force && node --input-type=module -e "await eval(Buffer.from('${encodedScript}', 'base64').toString())"`;
 }
 
 /** The narrow browser view contract supplied by pi-web-ui. */
