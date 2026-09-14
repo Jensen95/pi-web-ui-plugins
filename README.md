@@ -11,7 +11,7 @@ These are English-only TypeScript ports of the upstream plugins. See
 
 | id                  | icon | What it does                                                                                                                 | Permissions                               |
 | ------------------- | ---- | ---------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
-| `catalog-sync`      | 🔄   | Builds this repository's source-only plugins in a temporary checkout, then reloads and installs its custom catalog.          | none                                      |
+| `catalog-sync`      | 🔄   | Lets you select source-only plugins to build, install, or update from a temporary checkout.                                  | none                                      |
 | `jira-review`       | 🎟️   | Reviews active Jira Cloud sprint tickets, saves agent-readiness scores, and manually posts approved notes.                   | `fs`, `net`, `tools`                      |
 | `webmail`           | 📬   | IMAP inbox, SMTP sending and new-mail notifications, with an optional switch that lets the agent manage the mailbox.         | `net:imap/smtp`, `tools`                  |
 | `db-client`         | 🗄️   | Schema browsing, SQL queries and row editing across MySQL, PostgreSQL, SQLite, SQL Server, MongoDB and Redis.                | `net`, `tools`                            |
@@ -44,21 +44,21 @@ Load `plugins/page-picker/extension/` as an unpacked extension after building (o
 ## Installing plugins
 
 `catalog-sync` is the tracked bootstrap entry. It clones this repository, runs the shared build once, and installs the
-source-only plugin directories from that temporary checkout. Install the bootstrap with its repository subdirectory:
+selected source-only plugin directories from that temporary checkout. Install the bootstrap with its repository subdirectory:
 
 ```sh
 pi-web-ui install Jensen95/pi-web-ui-plugins/plugins/catalog-sync
 ```
 
-To install every plugin in the catalog at once, install `catalog-sync`, open its view, and choose **Reload custom plugins**.
-Its terminal command builds all source-only plugins before installing them.
+To update or install selected catalog plugins, install `catalog-sync`, open its view, check the desired entries, and choose **Update selected plugins**.
+Entries start unchecked; its terminal command builds the repository once and installs only the selected plugins.
 
 ### Custom catalogs
 
 Recent pi-web-ui versions support custom catalog entries. Open **Settings → UI plugins → Plugin marketplace →
 Add plugin** and enter a source such as `Jensen95/pi-web-ui-plugins/plugins/image-toolkit`. Entries are stored
 in `~/.pi-web/plugin-catalog.json` (or `<dataDir>/plugin-catalog.json`) and appear alongside the built-in catalog.
-For this source-only repository, install `catalog-sync` and use its reload button instead of installing a listed source directly.
+For this source-only repository, install `catalog-sync` and use its selector instead of installing a listed source directly.
 
 To load this repository's complete catalog as a custom catalog:
 
@@ -68,8 +68,8 @@ curl -fsSL https://raw.githubusercontent.com/Jensen95/pi-web-ui-plugins/main/plu
  jq '{entries: .}' > ~/.pi-web/plugin-catalog.json
 ```
 
-Refresh pi-web-ui after writing the file, then install `catalog-sync` and use its **Reload custom plugins** button to
-build and install every source through the visible terminal. The release workflow remains available for tagged archives,
+Refresh pi-web-ui after writing the file, then install `catalog-sync`, select the plugins you want, and use its
+**Update selected plugins** button to build and install them through the visible terminal. The release workflow remains available for tagged archives,
 but a release is not required for installation. Runtime packages for plugins that need them are installed by pi-web-ui
 on first activation via `ensureDeps`.
 
@@ -127,8 +127,8 @@ plugins/<id>/
   client/vendor/*      GENERATED  - ignored, third-party bundles
 ```
 
-`plugins/catalog-sync/client/entry.mjs` is the one tracked bootstrap exception. Its reload command clones the repository,
-runs `npm ci` and `npm run build`, then installs the generated local directories. The Page Picker extension is built
+`plugins/catalog-sync/client/entry.mjs` is the one tracked bootstrap exception. Its update command clones the repository,
+runs `npm ci` and `npm run build`, then installs the selected generated local directories. The Page Picker extension is built
 separately from its TypeScript sources.
 
 `scripts/build-plugins.mjs` is convention-driven: one shared builder walks `plugins/*/`, and there are no

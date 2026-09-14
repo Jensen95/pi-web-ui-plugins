@@ -40,7 +40,7 @@ vscode-editor/
 ```bash
 # ── Install source-only catalog plugins ──
 pi-web-ui install Jensen95/pi-web-ui-plugins/plugins/catalog-sync
-# Open catalog-sync and choose "Reload custom plugins"
+# Open catalog-sync, select this plugin, and choose "Update selected plugins"
 # Local development: build this plugin before installing its directory
 npm run build:vscode-editor
 pi-web-ui install plugins/vscode-editor
@@ -50,7 +50,7 @@ pi-web-ui install plugins/vscode-editor
 pi-web-ui plugins                            # lists installed plugins and IDs
 
 # ── Update ──
-# Use catalog-sync to rebuild and reinstall all catalog plugins.
+# Select vscode-editor in catalog-sync to rebuild and reinstall it.
 # Back up ssh-hosts.json and the workspace .vscode/sftp.json first
 
 # ── Uninstall ──

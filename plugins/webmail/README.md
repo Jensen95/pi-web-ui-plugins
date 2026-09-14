@@ -30,7 +30,7 @@ Passwords are stored first in the host’s encrypted secret facility (`host.secr
 ```bash
 # ── Install source-only catalog plugins ──
 pi-web-ui install Jensen95/pi-web-ui-plugins/plugins/catalog-sync
-# Open catalog-sync and choose "Reload custom plugins"
+# Open catalog-sync, select this plugin, and choose "Update selected plugins"
 # Local development: build this plugin before installing its directory
 npm run build:webmail
 pi-web-ui install plugins/webmail
@@ -40,7 +40,7 @@ pi-web-ui install plugins/webmail
 pi-web-ui plugins                            # lists installed plugins and IDs
 
 # ── Update ──
-# Use catalog-sync to rebuild and reinstall all catalog plugins.
+# Select webmail in catalog-sync to rebuild and reinstall it.
 # Back up config.json in the plugin directory first
 
 # ── Uninstall ──

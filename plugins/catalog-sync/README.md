@@ -1,6 +1,6 @@
 # Plugin Catalog Sync
 
-Reloads this repository's custom plugin sources from:
+Provides a selectable list of this repository's custom plugin sources from:
 
 ```text
 https://raw.githubusercontent.com/Jensen95/pi-web-ui-plugins/main/plugins/catalog.json
@@ -8,13 +8,15 @@ https://raw.githubusercontent.com/Jensen95/pi-web-ui-plugins/main/plugins/catalo
 
 ## Use
 
-Open the plugin view and choose **Reload custom plugins**. It opens the host's visible terminal and runs one command that:
+Open the plugin view, select one or more unchecked entries, and choose **Update selected plugins**. It opens the host's visible terminal and runs one command that:
 
-1. updates this plugin itself, so the host's install watcher can reload plugins;
-2. fetches and validates the remote catalog;
-3. clones this repository into a temporary directory, runs `npm ci` and `npm run build` once;
-4. installs each other plugin from its generated local directory with `--name <id> --force`;
-5. writes `plugin-catalog.json` under `PI_WEB_DATA_DIR` or `~/.pi-web` only after every install succeeds.
+1. fetches and validates the remote catalog;
+2. clones this repository into a temporary directory, runs `npm ci` and `npm run build` once;
+3. installs only the selected plugins from their generated local directories with `--name <id> --force`;
+4. updates this plugin itself only when `catalog-sync` is selected;
+5. writes the complete `plugin-catalog.json` under `PI_WEB_DATA_DIR` or `~/.pi-web` only after every selected install succeeds.
+
+Entries start unchecked, and unselected plugins remain available in the catalog for a later run.
 
 The command uses Node's built-in `fetch`, Git, npm and `pi-web-ui`; it does not require `curl` or `jq`. The catalog is deliberately restricted to this repository's `plugins/<id>` sources so the temporary checkout can build them together.
 

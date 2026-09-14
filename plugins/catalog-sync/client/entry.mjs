@@ -4,14 +4,17 @@
 var CATALOG_URL = "https://raw.githubusercontent.com/Jensen95/pi-web-ui-plugins/main/plugins/catalog.json";
 var SOURCE_REPOSITORY = "Jensen95/pi-web-ui-plugins";
 var EVENT_NAME = "pi-web-ui:plugin-run-command";
-var COMMAND_TITLE = "Reload custom plugins";
+var COMMAND_TITLE = "Update selected plugins";
 var SELF_SOURCE = `${SOURCE_REPOSITORY}/plugins/catalog-sync`;
-var COMMAND_SCRIPT = `
+var SOURCE_PREFIX = `${SOURCE_REPOSITORY}/plugins/`;
+var ID_PATTERN = /^[A-Za-z0-9_-]+$/;
+var COMMAND_SCRIPT = (requestedIds) => `
+const requestedIds = ${JSON.stringify(requestedIds ?? null)};
 const response = await fetch(${JSON.stringify(CATALOG_URL)}, { signal: AbortSignal.timeout(30000) });
 if (!response.ok) throw new Error("catalog request failed: HTTP " + response.status);
 const entries = await response.json();
 if (!Array.isArray(entries) || entries.length === 0) throw new Error("catalog must be a non-empty JSON array");
-const sourcePrefix = ${JSON.stringify(`${SOURCE_REPOSITORY}/plugins/`)};
+const sourcePrefix = ${JSON.stringify(SOURCE_PREFIX)};
 const ids = new Set();
 for (const entry of entries) {
   const source = entry && typeof entry === "object" ? entry.source : undefined;
@@ -26,6 +29,11 @@ for (const entry of entries) {
   }
   if (ids.has(id)) throw new Error("catalog contains duplicate plugin id: " + id);
   ids.add(id);
+}
+const selectedIds = new Set(requestedIds ?? ids);
+if (selectedIds.size === 0) throw new Error("select at least one plugin");
+for (const id of selectedIds) {
+  if (!ids.has(id)) throw new Error("selected plugin is not in the catalog: " + id);
 }
 const fs = await import("node:fs");
 const os = await import("node:os");
@@ -56,7 +64,7 @@ try {
     }
   }
   for (const entry of entries) {
-    if (entry.id === "catalog-sync") continue;
+    if (!selectedIds.has(entry.id) || entry.id === "catalog-sync") continue;
     run(cli, ["install", path.join(checkout, "plugins", entry.id), "--name", entry.id, "--force"]);
   }
 
@@ -74,9 +82,36 @@ try {
   fs.rmSync(checkout, { recursive: true, force: true });
 }
 `;
-function reloadCommand() {
-  const encodedScript = btoa(`(async () => {${COMMAND_SCRIPT}})()`);
-  return `pi-web-ui install ${SELF_SOURCE} --name catalog-sync --force && node --input-type=module -e "await eval(Buffer.from('${encodedScript}', 'base64').toString())"`;
+function reloadCommand(requestedIds) {
+  const encodedScript = btoa(`(async () => {${COMMAND_SCRIPT(requestedIds)}})()`);
+  const selfUpdate = requestedIds === void 0 || requestedIds.includes("catalog-sync") ? `pi-web-ui install ${SELF_SOURCE} --name catalog-sync --force && ` : "";
+  return `${selfUpdate}node --input-type=module -e "await eval(Buffer.from('${encodedScript}', 'base64').toString())"`;
+}
+function parseCatalog(value) {
+  if (!Array.isArray(value) || value.length === 0) throw new Error("catalog must be a non-empty JSON array");
+  const ids = /* @__PURE__ */ new Set();
+  return value.map((item) => {
+    if (!item || typeof item !== "object") throw new Error("catalog contains an invalid plugin entry");
+    const entry = item;
+    const id = entry.id;
+    const source = entry.source;
+    if (typeof id !== "string" || !ID_PATTERN.test(id) || typeof source !== "string" || source.trim() !== SOURCE_PREFIX + id || ids.has(id)) {
+      throw new Error("catalog contains an invalid plugin id or source");
+    }
+    ids.add(id);
+    return {
+      id,
+      source,
+      name: typeof entry.name === "string" && entry.name.trim() ? entry.name : id,
+      icon: typeof entry.icon === "string" ? entry.icon : void 0,
+      description: typeof entry.description === "string" ? entry.description : void 0
+    };
+  });
+}
+async function fetchCatalog() {
+  const response = await fetch(CATALOG_URL);
+  if (!response.ok) throw new Error(`catalog request failed: HTTP ${response.status}`);
+  return parseCatalog(await response.json());
 }
 function setStatus(status, text) {
   status.textContent = text;
@@ -87,9 +122,21 @@ var clientEntry = {
     const button = document.createElement("button");
     button.type = "button";
     button.textContent = COMMAND_TITLE;
+    button.disabled = true;
     const status = document.createElement("p");
-    status.textContent = "Ready.";
+    status.textContent = "Loading plugin catalog…";
+    const list = document.createElement("fieldset");
+    const legend = document.createElement("legend");
+    legend.textContent = "Select plugins to update or install";
+    list.append(legend);
+    const checkboxes = [];
+    let disposed = false;
     const onClick = () => {
+      const selectedIds = checkboxes.filter((checkbox) => checkbox.checked).map((checkbox) => checkbox.value);
+      if (selectedIds.length === 0) {
+        setStatus(status, "Select at least one plugin.");
+        return;
+      }
       const view = document.defaultView;
       if (!view || typeof view.dispatchEvent !== "function") {
         setStatus(status, "The terminal bridge is unavailable.");
@@ -98,17 +145,42 @@ var clientEntry = {
       try {
         view.dispatchEvent(
           new CustomEvent(EVENT_NAME, {
-            detail: { title: COMMAND_TITLE, command: reloadCommand() }
+            detail: { title: COMMAND_TITLE, command: reloadCommand(selectedIds) }
           })
         );
-        setStatus(status, "Reload request sent to the terminal.");
+        setStatus(status, "Update request sent to the terminal.");
       } catch {
-        setStatus(status, "Could not start the reload command.");
+        setStatus(status, "Could not start the update command.");
       }
     };
     button.addEventListener("click", onClick);
-    container.append(button, status);
+    container.append(button, status, list);
+    void fetchCatalog().then((entries) => {
+      if (disposed) return;
+      for (const entry of entries) {
+        const label = document.createElement("label");
+        const checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.value = entry.id;
+        const title = document.createElement("span");
+        title.textContent = `${entry.icon ? `${entry.icon} ` : ""}${entry.name} (${entry.id})`;
+        label.append(checkbox, title);
+        if (entry.description) {
+          const description = document.createElement("span");
+          description.textContent = ` — ${entry.description}`;
+          label.append(description);
+        }
+        list.append(label);
+        checkboxes.push(checkbox);
+      }
+      button.disabled = false;
+      setStatus(status, "Select one or more plugins, then update.");
+    }).catch(() => {
+      if (disposed) return;
+      setStatus(status, "Could not load the plugin catalog.");
+    });
     return () => {
+      disposed = true;
       button.removeEventListener("click", onClick);
       container.replaceChildren();
     };

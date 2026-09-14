@@ -3,6 +3,6 @@
 	"name": "Plugin Catalog Sync",
 	"version": "0.1.0",
 	"icon": "🔄",
-	"description": "Reload this repository's custom plugin catalog and update every listed plugin through the host terminal.",
+	"description": "Select plugins from this repository's catalog to build and install or update through the host terminal.",
 	"view": true
 }

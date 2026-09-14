@@ -2,7 +2,7 @@ import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, wr
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildPlugin } from "../helpers/plugin-build";
 import { importClientArtifact, isClientEntry, loadPlugin } from "../helpers/plugin-contract";
 import { repoPath } from "../helpers/repo-files";
@@ -24,6 +24,8 @@ interface FakeElement {
 	textContent: string;
 	value: string;
 	type: string;
+	checked: boolean;
+	disabled: boolean;
 	children: FakeElement[];
 	ownerDocument: FakeDocument;
 	append(...children: FakeElement[]): void;
@@ -45,7 +47,9 @@ function createFakeDom(defaultView?: FakeWindow): { document: FakeDocument; cont
 		const element: FakeElement = {
 			textContent: "",
 			value: "",
-			type: tagName === "button" ? "button" : "",
+			type: tagName === "button" || tagName === "p" ? tagName : "",
+			checked: false,
+			disabled: false,
 			children: [],
 			ownerDocument: document,
 			append(...children) {
@@ -63,6 +67,7 @@ function createFakeDom(defaultView?: FakeWindow): { document: FakeDocument; cont
 				listeners.get(type)?.delete(listener);
 			},
 			click() {
+				if (element.type === "checkbox") element.checked = !element.checked;
 				for (const listener of listeners.get("click") ?? []) listener();
 			},
 		};
@@ -75,13 +80,17 @@ function createFakeDom(defaultView?: FakeWindow): { document: FakeDocument; cont
 
 interface CatalogSyncClientModule {
 	CATALOG_URL: string;
-	reloadCommand(): string;
+	reloadCommand(requestedIds?: string[]): string;
 	default: {
 		mount?(container: unknown, ctx: unknown): (() => void) | undefined;
 	};
 }
 
 const SOURCE_MODULE = "../../plugins/catalog-sync/src/client.ts";
+
+afterEach(() => {
+	vi.unstubAllGlobals();
+});
 
 async function loadSource(): Promise<CatalogSyncClientModule> {
 	return (await import(SOURCE_MODULE)) as CatalogSyncClientModule;
@@ -94,6 +103,7 @@ function decodeCommandScript(command: string): string {
 }
 
 interface ScriptOptions {
+	selectedIds?: string[];
 	failId?: string;
 	failPhase?: "clone" | "npm-ci" | "npm-build";
 	httpStatus?: number;
@@ -193,7 +203,7 @@ if (process.env.FAIL_ID && nameIndex >= 0 && args[nameIndex + 1] === process.env
 	chmodSync(cli, 0o755);
 
 	const { reloadCommand } = await loadSource();
-	const source = decodeCommandScript(reloadCommand());
+	const source = decodeCommandScript(reloadCommand(options.selectedIds));
 	const response = JSON.stringify(entries) ?? "undefined";
 	const httpStatus = options.httpStatus ?? 200;
 	const runner = `globalThis.fetch = async () => ({ ok: ${httpStatus >= 200 && httpStatus < 300}, status: ${httpStatus}, json: async () => ${response} }); await (async () => {${source}})();`;
@@ -259,6 +269,29 @@ describe("catalog-sync terminal command", () => {
 		]);
 		expect(JSON.parse(run.catalog ?? "null")).toEqual({ entries });
 		expect(run.checkoutExists).toBe(false);
+	});
+
+	it("installs only the selected plugins while keeping the full catalog", async () => {
+		const run = await runCommandScript(entries, { selectedIds: ["alpha"] });
+
+		expect(run.status, run.stderr).toBe(0);
+		expect(run.calls, run.stderr).toEqual([
+			"git:clone --depth 1 https://github.com/Jensen95/pi-web-ui-plugins.git <tmp>/checkout",
+			"npm:<tmp>/checkout:ci",
+			"npm:<tmp>/checkout:run build",
+			"pi-web-ui:install <tmp>/checkout/plugins/alpha --name alpha --force",
+		]);
+		expect(JSON.parse(run.catalog ?? "null")).toEqual({ entries });
+	});
+
+	it.each([
+		["empty selection", [] as string[]],
+		["unknown plugin", ["missing"]],
+	])("rejects an invalid selection (%s) before cloning", async (_label, selectedIds) => {
+		const run = await runCommandScript(entries, { selectedIds });
+		expect(run.status).not.toBe(0);
+		expect(run.calls).toEqual([]);
+		expect(run.catalog).toBeUndefined();
 	});
 
 	it("rejects an HTTP failure without cloning or replacing the catalog", async () => {
@@ -362,7 +395,42 @@ describe("catalog-sync manifest and distribution", () => {
 });
 
 describe("catalog-sync view", () => {
-	it("renders one reload control and sends the catalog sync command", async () => {
+	const catalogEntries = [
+		{
+			id: "alpha",
+			name: "Alpha",
+			icon: "🅰️",
+			description: "Alpha plugin",
+			source: "Jensen95/pi-web-ui-plugins/plugins/alpha",
+		},
+		{
+			id: "beta",
+			name: "Beta",
+			source: "Jensen95/pi-web-ui-plugins/plugins/beta",
+		},
+	];
+
+	function stubCatalog(): void {
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () => ({
+				ok: true,
+				status: 200,
+				json: async () => catalogEntries,
+			})),
+		);
+	}
+
+	async function waitForCatalog(): Promise<void> {
+		await new Promise((resolve) => setTimeout(resolve, 0));
+	}
+
+	function findElements(root: FakeElement, predicate: (element: FakeElement) => boolean): FakeElement[] {
+		return [...(predicate(root) ? [root] : []), ...root.children.flatMap((child) => findElements(child, predicate))];
+	}
+
+	it("renders unchecked catalog entries and dispatches only the selected plugin", async () => {
+		stubCatalog();
 		const events: FakeEvent[] = [];
 		const { container } = createFakeDom({
 			dispatchEvent(event) {
@@ -373,32 +441,26 @@ describe("catalog-sync view", () => {
 		const { default: entry, CATALOG_URL: sourceUrl } = await loadSource();
 
 		expect(sourceUrl).toBe(CATALOG_URL);
-		const cleanup = entry.mount?.(container as unknown as HTMLElement, {} as never);
-		expect(container.children).toHaveLength(2);
-		expect(container.children[0]?.textContent).toBe("Reload custom plugins");
-		expect(container.children[1]?.textContent).toBe("Ready.");
+		entry.mount?.(container as unknown as HTMLElement, {} as never);
+		await waitForCatalog();
 
-		container.children[0]?.click();
+		const checkboxes = findElements(container, (element) => element.type === "checkbox");
+		expect(checkboxes).toHaveLength(2);
+		expect(checkboxes.every((checkbox) => checkbox.checked)).toBe(false);
+		checkboxes[0]?.click();
+		findElements(container, (element) => element.type === "button")[0]?.click();
+
 		expect(events).toHaveLength(1);
 		expect(events[0]?.type).toBe(EVENT_NAME);
-		const firstEvent = events[0]!;
-		expect(firstEvent.detail).toMatchObject({ title: "Reload custom plugins" });
-		const command = (firstEvent.detail as { command: string }).command;
-		expect(command).toContain(
-			"pi-web-ui install Jensen95/pi-web-ui-plugins/plugins/catalog-sync --name catalog-sync --force",
-		);
-		expect(command).toContain("node --input-type=module");
+		expect(events[0]?.detail).toMatchObject({ title: "Update selected plugins" });
+		const command = (events[0]!.detail as { command: string }).command;
 		const script = decodeCommandScript(command);
-		expect(command).toContain('await eval(Buffer.from(');
-		expect(script).toMatch(/^\(async \(\) => \{/);
-		expect(script).toContain(CATALOG_URL);
-		expect(script).toContain("plugin-catalog.json");
-		expect(container.children[1]?.textContent).toBe("Reload request sent to the terminal.");
-		cleanup?.();
-		expect(container.children).toEqual([]);
+		expect(script).toContain('const requestedIds = ["alpha"];');
+		expect(script).not.toContain('const requestedIds = ["beta"];');
 	});
 
-	it("supports repeated reloads without sharing mutable event details", async () => {
+	it("does not dispatch when no plugin is selected", async () => {
+		stubCatalog();
 		const events: FakeEvent[] = [];
 		const { container } = createFakeDom({
 			dispatchEvent(event) {
@@ -408,28 +470,56 @@ describe("catalog-sync view", () => {
 		});
 		const { default: entry } = await loadSource();
 		entry.mount?.(container as unknown as HTMLElement, {} as never);
+		await waitForCatalog();
 
-		container.children[0]?.click();
-		container.children[0]?.click();
-		expect(events).toHaveLength(2);
-		expect(events.map((event) => event.type)).toEqual([EVENT_NAME, EVENT_NAME]);
-		const firstDetail = events[0]!.detail as { title: string; command: string };
-		const secondDetail = events[1]!.detail as { title: string; command: string };
-		expect(firstDetail.title).toBe("Reload custom plugins");
-		expect(secondDetail.title).toBe("Reload custom plugins");
-		expect(firstDetail.command).toBe(secondDetail.command);
+		findElements(container, (element) => element.type === "button")[0]?.click();
+
+		expect(events).toHaveLength(0);
+		expect(findElements(container, (element) => element.type === "p")[0]?.textContent).toBe(
+			"Select at least one plugin.",
+		);
+	});
+
+	it("reports a catalog fetch failure and does not dispatch", async () => {
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () => {
+				throw new Error("network unavailable");
+			}),
+		);
+		const events: FakeEvent[] = [];
+		const { container } = createFakeDom({
+			dispatchEvent(event) {
+				events.push(event);
+				return true;
+			},
+		});
+		const { default: entry } = await loadSource();
+		entry.mount?.(container as unknown as HTMLElement, {} as never);
+		await waitForCatalog();
+
+		expect(events).toHaveLength(0);
+		expect(findElements(container, (element) => element.type === "p")[0]?.textContent).toBe(
+			"Could not load the plugin catalog.",
+		);
 	});
 
 	it("shows a useful error when the host terminal bridge is unavailable", async () => {
+		stubCatalog();
 		const { container } = createFakeDom();
 		const { default: entry } = await loadSource();
 		entry.mount?.(container as unknown as HTMLElement, {} as never);
+		await waitForCatalog();
+		findElements(container, (element) => element.type === "checkbox")[0]?.click();
 
-		expect(() => container.children[0]?.click()).not.toThrow();
-		expect(container.children[1]?.textContent).toBe("The terminal bridge is unavailable.");
+		expect(() => findElements(container, (element) => element.type === "button")[0]?.click()).not.toThrow();
+		expect(findElements(container, (element) => element.type === "p")[0]?.textContent).toBe(
+			"The terminal bridge is unavailable.",
+		);
 	});
 
 	it("shows a useful error when the host rejects dispatch", async () => {
+		stubCatalog();
 		const { container } = createFakeDom({
 			dispatchEvent: vi.fn(() => {
 				throw new Error("host unavailable");
@@ -437,8 +527,12 @@ describe("catalog-sync view", () => {
 		});
 		const { default: entry } = await loadSource();
 		entry.mount?.(container as unknown as HTMLElement, {} as never);
+		await waitForCatalog();
+		findElements(container, (element) => element.type === "checkbox")[0]?.click();
 
-		expect(() => container.children[0]?.click()).not.toThrow();
-		expect(container.children[1]?.textContent).toBe("Could not start the reload command.");
+		expect(() => findElements(container, (element) => element.type === "button")[0]?.click()).not.toThrow();
+		expect(findElements(container, (element) => element.type === "p")[0]?.textContent).toBe(
+			"Could not start the update command.",
+		);
 	});
 });
