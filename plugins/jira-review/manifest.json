@@ -1,0 +1,8 @@
+{
+	"id": "jira-review",
+	"name": "Jira Review",
+	"version": "0.1.0",
+	"icon": "🎟️",
+	"description": "Review active Jira Cloud sprint tickets for agent pickup, save structured readiness scores, and manually post approved notes.",
+	"permissions": ["fs", "net", "tools"]
+}
