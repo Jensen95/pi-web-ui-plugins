@@ -24,16 +24,19 @@ import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { CJK_RE, findCjk, formatCjkHits, isGitIgnored, pluginIds, repoPath } from "../helpers/repo-files";
 
-/** The eight plugins this repo ships, and the artifacts each one must compile to. */
+/** The eleven plugins this repo ships, and the artifacts each one must compile to. */
 const EXPECTED_ARTIFACTS: Record<string, { server: boolean; client: boolean }> = {
+	"catalog-sync": { server: false, client: true },
 	"db-client": { server: true, client: true },
 	"image-toolkit": { server: true, client: true },
+	"jira-review": { server: true, client: true },
 	"mcp-manager": { server: true, client: true },
 	mermaid: { server: false, client: true },
 	"run-trace": { server: true, client: true },
 	"ui-shortcuts": { server: false, client: true },
 	"vscode-editor": { server: true, client: true },
 	webmail: { server: true, client: true },
+	"worktree-preparer": { server: true, client: true },
 };
 const EXPECTED_IDS = Object.keys(EXPECTED_ARTIFACTS).sort();
 
@@ -163,7 +166,7 @@ function isNodeBuiltin(specifier: string): boolean {
 }
 
 describe("plugin manifests", () => {
-	it("exist for exactly the eight plugins this repo ships", () => {
+	it("exist for exactly the eleven plugins this repo ships", () => {
 		expect(pluginIds(), "plugin directories under plugins/ must match the ported set").toEqual(EXPECTED_IDS);
 		for (const id of EXPECTED_IDS) {
 			expect(existsSync(repoPath(manifestRel(id))), `${manifestRel(id)} is missing`).toBe(true);

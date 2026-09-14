@@ -16,6 +16,22 @@
 		"homepage": "https://github.com/Jensen95/pi-web-ui-plugins/tree/main/plugins/webmail"
 	},
 	{
+		"id": "catalog-sync",
+		"name": "Plugin Catalog Sync",
+		"icon": "🔄",
+		"description": "Reload this repository's custom plugin catalog and update every listed plugin through the host terminal.",
+		"source": "Jensen95/pi-web-ui-plugins/plugins/catalog-sync",
+		"homepage": "https://github.com/Jensen95/pi-web-ui-plugins/tree/main/plugins/catalog-sync"
+	},
+	{
+		"id": "jira-review",
+		"name": "Jira Review",
+		"icon": "🎟️",
+		"description": "Review active Jira Cloud sprint tickets, save agent-readiness scores, and manually post approved notes.",
+		"source": "Jensen95/pi-web-ui-plugins/plugins/jira-review",
+		"homepage": "https://github.com/Jensen95/pi-web-ui-plugins/tree/main/plugins/jira-review"
+	},
+	{
 		"id": "db-client",
 		"name": "db-client",
 		"icon": "🗄️",
@@ -62,5 +78,13 @@
 		"description": "Switch between views with keyboard shortcuts, or bind composer drafts and new-chat prompts to custom keys.",
 		"source": "Jensen95/pi-web-ui-plugins/plugins/ui-shortcuts",
 		"homepage": "https://github.com/Jensen95/pi-web-ui-plugins/tree/main/plugins/ui-shortcuts"
+	},
+	{
+		"id": "worktree-preparer",
+		"name": "Worktree Preparer",
+		"icon": "🌿",
+		"description": "Assemble selected workspace folders and Git repositories into a fresh multi-project worktree folder.",
+		"source": "Jensen95/pi-web-ui-plugins/plugins/worktree-preparer",
+		"homepage": "https://github.com/Jensen95/pi-web-ui-plugins/tree/main/plugins/worktree-preparer"
 	}
 ]

@@ -9,16 +9,19 @@ These are English-only TypeScript ports of the upstream plugins. See
 
 ## Plugins
 
-| id              | icon | What it does                                                                                                                 | Permissions                               |
-| --------------- | ---- | ---------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
-| `webmail`       | 📬   | IMAP inbox, SMTP sending and new-mail notifications, with an optional switch that lets the agent manage the mailbox.         | `net:imap/smtp`, `tools`                  |
-| `db-client`     | 🗄️   | Schema browsing, SQL queries and row editing across MySQL, PostgreSQL, SQLite, SQL Server, MongoDB and Redis.                | `net`, `tools`                            |
-| `vscode-editor` | 📝   | Multi-root file tree, tabbed CodeMirror editing, xterm.js terminals, Remote-SSH browsing and SFTP sync.                      | `fs:workspace+ssh`, `net:ssh`, `terminal` |
-| `mermaid`       | 📊   | Renders `mermaid` fences in messages as SVG. Renderer plugin, so the engine loads only when such a fence appears.            | none                                      |
-| `run-trace`     | 🧭   | Aggregates a run into one replayable timeline: task, reasoning, tool calls, file changes, result.                            | none                                      |
-| `mcp-manager`   | 🔌   | Manages MCP servers through `pi-mcp-adapter`: inspect the effective config, enable or disable servers, add or remove them.   | `http`                                    |
-| `image-toolkit` | 🖼    | Compresses, crops, resizes, converts, watermarks and inspects workspace images, with four AI tools.                          | `fs`, `http`, `tools`                     |
-| `ui-shortcuts`  | ⌨️   | Switches between the Terminal, Editor and Run Trace views, with a small UI for custom view, compose, and new-chat shortcuts. | none                                      |
+| id                  | icon | What it does                                                                                                                 | Permissions                               |
+| ------------------- | ---- | ---------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
+| `catalog-sync`      | 🔄   | Reloads this repository's custom plugin catalog and updates every listed plugin through the host terminal.                   | none                                      |
+| `jira-review`       | 🎟️   | Reviews active Jira Cloud sprint tickets, saves agent-readiness scores, and manually posts approved notes.                   | `fs`, `net`, `tools`                      |
+| `webmail`           | 📬   | IMAP inbox, SMTP sending and new-mail notifications, with an optional switch that lets the agent manage the mailbox.         | `net:imap/smtp`, `tools`                  |
+| `db-client`         | 🗄️   | Schema browsing, SQL queries and row editing across MySQL, PostgreSQL, SQLite, SQL Server, MongoDB and Redis.                | `net`, `tools`                            |
+| `vscode-editor`     | 📝   | Multi-root file tree, tabbed CodeMirror editing, xterm.js terminals, Remote-SSH browsing and SFTP sync.                      | `fs:workspace+ssh`, `net:ssh`, `terminal` |
+| `mermaid`           | 📊   | Renders `mermaid` fences in messages as SVG. Renderer plugin, so the engine loads only when such a fence appears.            | none                                      |
+| `run-trace`         | 🧭   | Aggregates a run into one replayable timeline: task, reasoning, tool calls, file changes, result.                            | none                                      |
+| `mcp-manager`       | 🔌   | Manages MCP servers through `pi-mcp-adapter`: inspect the effective config, enable or disable servers, add or remove them.   | `http`                                    |
+| `image-toolkit`     | 🖼    | Compresses, crops, resizes, converts, watermarks and inspects workspace images, with four AI tools.                          | `fs`, `http`, `tools`                     |
+| `ui-shortcuts`      | ⌨️   | Switches between the Terminal, Editor and Run Trace views, with a small UI for custom view, compose, and new-chat shortcuts. | none                                      |
+| `worktree-preparer` | 🌿   | Assembles selected workspace folders and Git repositories into a fresh multi-project worktree folder.                        | `fs`, `terminal`                          |
 
 `plugins/catalog.json` is the machine-readable form of this table. pi-web-ui reads it as its built-in
 plugin-marketplace list, so the two must not drift.
@@ -44,14 +47,17 @@ Compiled runtime entries are intentionally tracked, so the normal GitHub install
 downloading an archive or running a build. Install one plugin with its repository subdirectory:
 
 ```sh
+pi-web-ui install Jensen95/pi-web-ui-plugins/plugins/catalog-sync
 pi-web-ui install Jensen95/pi-web-ui-plugins/plugins/db-client
 pi-web-ui install Jensen95/pi-web-ui-plugins/plugins/image-toolkit
+pi-web-ui install Jensen95/pi-web-ui-plugins/plugins/jira-review
 pi-web-ui install Jensen95/pi-web-ui-plugins/plugins/mcp-manager
 pi-web-ui install Jensen95/pi-web-ui-plugins/plugins/mermaid
 pi-web-ui install Jensen95/pi-web-ui-plugins/plugins/run-trace
 pi-web-ui install Jensen95/pi-web-ui-plugins/plugins/ui-shortcuts
 pi-web-ui install Jensen95/pi-web-ui-plugins/plugins/vscode-editor
 pi-web-ui install Jensen95/pi-web-ui-plugins/plugins/webmail
+pi-web-ui install Jensen95/pi-web-ui-plugins/plugins/worktree-preparer
 ```
 
 To install every plugin in the catalog at once:
@@ -76,9 +82,10 @@ curl -fsSL https://raw.githubusercontent.com/Jensen95/pi-web-ui-plugins/main/plu
  jq '{entries: .}' > ~/.pi-web/plugin-catalog.json
 ```
 
-Refresh pi-web-ui after writing the file. The release workflow remains available for tagged archives, but a
-release is not required for installation. Runtime packages for plugins that need them are installed by pi-web-ui
-on first activation via `ensureDeps`.
+Refresh pi-web-ui after writing the file. Alternatively, install `catalog-sync` and use its **Reload custom plugins**
+button to fetch and install every source through the visible terminal. The release workflow remains available for tagged
+archives, but a release is not required for installation. Runtime packages for plugins that need them are installed by
+pi-web-ui on first activation via `ensureDeps`.
 
 ## Development
 
@@ -86,6 +93,9 @@ on first activation via `ensureDeps`.
 npm install              # once; every dependency lives in the root package.json
 npm run build            # compile every pi-web-ui plugin plus the two vendor bundles
 npm run build:extension  # build the standalone Page Picker browser extension
+npm run build:catalog-sync # compile the catalog sync plugin
+npm run build:jira-review  # compile the Jira review plugin
+npm run build:worktree-preparer # compile the worktree preparer plugin
 npm run build:mermaid    # compile one plugin (also available for every other id)
 npm test                 # vitest, tests/unit/*.test.ts
 npm run typecheck        # tsc --noEmit, strict, over plugin and extension TypeScript plus tests
@@ -169,6 +179,9 @@ implementations of `webmail`, `db-client`, `vscode-editor`, `mermaid`, `run-trac
 come from. This repository ports them to English and converts the plugin and extension sources to TypeScript. The
 Page Picker remains a separate browser-side deliverable rather than a catalog plugin.
 
+`catalog-sync` and `mcp-manager` are original to this repository. `catalog-sync` provides the current best-effort
+terminal bridge because the upstream host has not exposed a supported catalog reload API.
+
 The upstream copyright notice, which MIT requires be carried into derivative works:
 
 > Copyright (c) xingshuyin
@@ -182,9 +195,8 @@ The upstream copyright notice, which MIT requires be carried into derivative wor
 
 [`LICENSE`](LICENSE) keeps this repository MIT and records the derivative-work attribution.
 
-`mcp-manager` is original to this repository. It is a front-end for
-[`pi-mcp-adapter`](https://www.npmjs.com/package/pi-mcp-adapter) by Nico Bailon and manages that adapter's
-configuration rather than replacing it.
+`mcp-manager` is a front-end for [`pi-mcp-adapter`](https://www.npmjs.com/package/pi-mcp-adapter) by Nico Bailon and
+manages that adapter's configuration rather than replacing it.
 
 ## License
 

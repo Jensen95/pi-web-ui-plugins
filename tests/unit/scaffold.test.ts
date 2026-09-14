@@ -26,14 +26,17 @@ import {
 import { REPO_ROOT, isGitIgnored, pluginIds, repoPath } from "../helpers/repo-files";
 
 const EXPECTED_PLUGIN_IDS = [
+	"catalog-sync",
 	"db-client",
 	"image-toolkit",
+	"jira-review",
 	"mcp-manager",
 	"mermaid",
 	"run-trace",
 	"ui-shortcuts",
 	"vscode-editor",
 	"webmail",
+	"worktree-preparer",
 ];
 
 const EXPECTED_SCRIPTS = [
@@ -99,7 +102,7 @@ function withTempDir<T>(run: (dir: string) => T): T {
 }
 
 describe("plugin skeleton", () => {
-	it("contains exactly the eight expected plugin directories", () => {
+	it("contains exactly the eleven expected plugin directories", () => {
 		expect(pluginIds()).toEqual(EXPECTED_PLUGIN_IDS);
 	});
 
