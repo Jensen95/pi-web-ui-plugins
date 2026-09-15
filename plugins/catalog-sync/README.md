@@ -43,11 +43,17 @@ Because the sha is the repository HEAD rather than a per-plugin path sha, any co
 every plugin from it as updatable. That is the host's definition of outdated; inventing a second one would
 disagree with `pi-web-ui check-updates`.
 
-**It does not update anything, and that is deliberate.** The only install path a plugin can reach is
-`host.reloadCatalog(source, { install: true })`, which never passes `--build`: `buildPluginJobArgs` adds
-that flag only when the job spec sets `build: true`, and the catalog-sync path never does. On a
-source-only repository it would replace working plugins with unbuilt source. So each stale row shows the
-command instead:
+## Updating
+
+Tick the plugins you want and choose **Send update command to terminal**. The stale ones start ticked; an
+up-to-date plugin can be ticked too, to force a rebuild. The selection becomes one shell line, chained with
+`&&`, and runs in a visible pi-web-ui terminal you can read and stop.
+
+It does **not** install silently, and it does not use `host.reloadCatalog({ install: true })`: that path
+never passes `--build` (`buildPluginJobArgs` adds the flag only when the job spec sets `build: true`, which
+the catalog-sync path never does), so on a source-only repository it would replace working plugins with
+unbuilt source. The terminal bridge (`pi-web-ui:plugin-run-command`) is undocumented and may change, but it
+is the only build-capable path reachable from plugin code — and the command stays legible the whole way:
 
 ```sh
 pi-web-ui install Jensen95/pi-web-ui-plugins/plugins/<id> --name <id> --build --force

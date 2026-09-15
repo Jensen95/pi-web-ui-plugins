@@ -15,6 +15,15 @@
 
 export const CATALOG_URL = "https://raw.githubusercontent.com/Jensen95/pi-web-ui-plugins/main/plugins/catalog.json";
 export const SYNC_TITLE = "Sync catalog";
+export const SEND_TITLE = "Send update command to terminal";
+/**
+ * The host's private bridge for running a command in a visible terminal. It is
+ * undocumented and may change, but it is the only way to reach a build-capable
+ * install from plugin code: reloadCatalog({install:true}) never passes --build.
+ * The user watches the command run and can stop it - nothing happens silently.
+ */
+export const RUN_COMMAND_EVENT = "pi-web-ui:plugin-run-command";
+export const TERMINAL_TITLE = "Update plugins";
 /** The host API version that introduced reloadCatalog. */
 const REQUIRED_API = 4;
 const UPGRADE_HINT = `${SYNC_TITLE} needs pi-web-ui 0.86 or newer (host API ${REQUIRED_API}+).`;
@@ -91,6 +100,14 @@ function parseRows(value: unknown): UpdateRow[] {
 	return value.filter((row): row is UpdateRow => typeof (row as UpdateRow)?.id === "string");
 }
 
+/** One shell line for the whole selection, so it is a single terminal run. */
+export function updateCommandFor(rows: UpdateRow[], selected: Set<string>): string {
+	return rows
+		.filter((row) => selected.has(row.id) && row.command)
+		.map((row) => row.command)
+		.join(" && ");
+}
+
 const clientEntry = {
 	mount(container: HTMLElement, ctx: ViewContext): () => void {
 		const document = container.ownerDocument;
@@ -116,8 +133,39 @@ const clientEntry = {
 		const updates = create("div");
 		updates.className = "catalog-sync__rows";
 		const updatesStatus = create("p", "Checking installed plugins...");
+		const send = create("button", SEND_TITLE);
+		send.type = "button";
+		send.disabled = true;
+
+		let currentRows: UpdateRow[] = [];
+		const selected = new Set<string>();
+
+		const refreshSend = (): void => {
+			send.disabled = updateCommandFor(currentRows, selected) === "";
+		};
+
+		const onSend = (): void => {
+			const command = updateCommandFor(currentRows, selected);
+			if (!command) return;
+			const view = container.ownerDocument.defaultView;
+			if (!view || typeof view.dispatchEvent !== "function") {
+				status.textContent = "The terminal bridge is unavailable in this host.";
+				return;
+			}
+			try {
+				view.dispatchEvent(new CustomEvent(RUN_COMMAND_EVENT, { detail: { title: TERMINAL_TITLE, command } }));
+				status.textContent = `Running the update for ${selected.size} plugin(s) in the terminal. Reload the page when it finishes.`;
+			} catch {
+				status.textContent = "Could not start the terminal command.";
+			}
+		};
 
 		const renderRows = (rows: UpdateRow[]): void => {
+			currentRows = rows;
+			selected.clear();
+			// Pre-tick the stale ones: they are the answer to "what do I want to update".
+			for (const row of rows) if (row.status === "update-available" && row.command) selected.add(row.id);
+			refreshSend();
 			if (rows.length === 0) {
 				updatesStatus.textContent = "No plugins installed from a tracked source yet.";
 				updates.replaceChildren();
@@ -134,6 +182,20 @@ const clientEntry = {
 					card.className = "catalog-sync__row";
 					const head = create("div");
 					head.className = "catalog-sync__head";
+					// Selectable whenever we know how to reinstall it - including an
+					// up-to-date plugin, so a forced rebuild is possible.
+					if (row.command) {
+						const box = create("input");
+						box.type = "checkbox";
+						box.value = row.id;
+						box.checked = selected.has(row.id);
+						box.addEventListener("click", () => {
+							if (box.checked) selected.add(row.id);
+							else selected.delete(row.id);
+							refreshSend();
+						});
+						head.append(box);
+					}
 					const name = create("span", row.name ?? row.id);
 					name.className = "catalog-sync__name";
 					head.append(name);
@@ -176,12 +238,13 @@ const clientEntry = {
 		};
 
 		button.addEventListener("click", onClick);
+		send.addEventListener("click", onSend);
 		const off = ctx.onData((payload: unknown) => {
 			const message = payload as { kind?: unknown; rows?: unknown };
 			if (disposed || message?.kind !== "updates") return;
 			renderRows(parseRows(message.rows));
 		});
-		root.append(style, heading, intro, source, button, status, updatesStatus, updates);
+		root.append(style, heading, intro, source, button, status, updatesStatus, send, updates);
 		container.append(root);
 		ctx.send({ action: "check_updates" });
 
@@ -189,6 +252,7 @@ const clientEntry = {
 			disposed = true;
 			off();
 			button.removeEventListener("click", onClick);
+			send.removeEventListener("click", onSend);
 			container.replaceChildren();
 		};
 	},

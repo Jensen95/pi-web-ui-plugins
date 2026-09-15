@@ -28,6 +28,8 @@ interface FakeElement {
 	tagName: string;
 	textContent: string;
 	type: string;
+	value: string;
+	checked: boolean;
 	disabled: boolean;
 	className: string;
 	children: FakeElement[];
@@ -65,6 +67,8 @@ function createDom(host?: unknown): {
 			tagName,
 			textContent: "",
 			type: "",
+			value: "",
+			checked: false,
 			disabled: false,
 			className: "",
 			children: [],
@@ -110,6 +114,15 @@ function visibleText(container: FakeElement): string {
 function syncButton(container: FakeElement): FakeElement {
 	const button = flatten(container).find((element) => element.tagName === "button");
 	if (!button) throw new Error("the view renders no button");
+	return button;
+}
+
+/** The button that hands the update command to a visible terminal. */
+function sendButton(container: FakeElement): FakeElement {
+	const button = flatten(container).find(
+		(element) => element.tagName === "button" && /terminal/i.test(element.textContent),
+	);
+	if (!button) throw new Error("the view renders no send-to-terminal button");
 	return button;
 }
 
@@ -270,7 +283,15 @@ describe("update list", () => {
 			status: "update-available",
 			command: "pi-web-ui install Jensen95/pi-web-ui-plugins/plugins/webmail --name webmail --build --force",
 		},
-		{ id: "mermaid", name: "Mermaid", version: "1.0.0", status: "current" },
+		{
+			id: "mermaid",
+			name: "Mermaid",
+			version: "1.0.0",
+			status: "current",
+			// The server sets a command for every row it knows the source of, not just
+			// the stale ones, so a forced rebuild stays possible.
+			command: "pi-web-ui install Jensen95/pi-web-ui-plugins/plugins/mermaid --name mermaid --build --force",
+		},
 		{ id: "legacy", name: "Legacy", status: "unknown" },
 	];
 
@@ -307,6 +328,63 @@ describe("update list", () => {
 		cleanup();
 	});
 
+	it("lets you pick which plugins to update and sends one command to a terminal", async () => {
+		const host = hostReturning({ ok: true, entries: [] });
+		const { container, dispatched, push, cleanup } = await mountView(host);
+		push({ kind: "updates", rows });
+
+		const boxes = flatten(container).filter((element) => element.type === "checkbox");
+		expect(boxes.length, "a box per updatable plugin").toBeGreaterThan(0);
+		// The stale ones are the answer to "what do I want to update", so they start ticked.
+		expect(boxes.filter((box) => box.checked).map((box) => box.value)).toEqual(["webmail"]);
+
+		sendButton(container).click();
+
+		expect(dispatched).toHaveLength(1);
+		const event = dispatched[0] as { type: string; detail: { title?: string; command?: string } };
+		expect(event.type).toBe(RETIRED_EVENT);
+		expect(event.detail.command).toContain("plugins/webmail");
+		expect(event.detail.command).toContain("--build");
+		expect(event.detail.command).toContain("--force");
+		expect(event.detail.command, "an up-to-date plugin was not selected").not.toContain("plugins/mermaid");
+		cleanup();
+	});
+
+	it("chains exactly the plugins that are still ticked", async () => {
+		const host = hostReturning({ ok: true, entries: [] });
+		const { container, dispatched, push, cleanup } = await mountView(host);
+		push({ kind: "updates", rows });
+
+		const boxes = flatten(container).filter((element) => element.type === "checkbox");
+		const mermaid = boxes.find((box) => box.value === "mermaid");
+		if (!mermaid) throw new Error("an up-to-date plugin must still be selectable for a forced reinstall");
+		mermaid.checked = true;
+		mermaid.click();
+		sendButton(container).click();
+
+		const command = (dispatched[0] as { detail: { command: string } }).detail.command;
+		expect(command).toContain("plugins/webmail");
+		expect(command).toContain("plugins/mermaid");
+		// One terminal run, not one per plugin.
+		expect(command.split("&&")).toHaveLength(2);
+		cleanup();
+	});
+
+	it("refuses to send an empty command when nothing is ticked", async () => {
+		const host = hostReturning({ ok: true, entries: [] });
+		const { container, dispatched, push, cleanup } = await mountView(host);
+		push({ kind: "updates", rows });
+
+		const webmail = flatten(container).find((element) => element.value === "webmail");
+		webmail!.checked = false;
+		webmail!.click();
+
+		expect(sendButton(container).disabled).toBe(true);
+		sendButton(container).click();
+		expect(dispatched).toEqual([]);
+		cleanup();
+	});
+
 	it("never claims it can update a plugin by itself", async () => {
 		// reloadCatalog({install:true}) is the only install path a plugin can reach
 		// and it never passes --build, which would replace these source-only plugins
@@ -332,14 +410,23 @@ describe("update list", () => {
 });
 
 describe("retired machinery", () => {
-	it("no longer carries a cloning, npm-running or terminal-driving source", () => {
+	it("no longer clones, runs npm, or hides what it does behind base64", () => {
 		// Comments stripped: the history may be explained, it may not be executed.
 		const source = readFileSync(repoPath("plugins", PLUGIN_ID, "src", "client.ts"), "utf8")
 			.replace(/\/\*[\s\S]*?\*\//g, "")
 			.replace(/^\s*\/\/.*$/gm, "");
-		for (const retired of [RETIRED_EVENT, "git clone", "npm ci", "spawnSync", "mkdtemp", "pi-web-ui install", "btoa"]) {
+		// The terminal event is back on purpose - it is the only build-capable path
+		// a plugin can reach - but the temp-checkout machinery stays dead, and the
+		// command must be readable in the terminal rather than an encoded blob.
+		for (const retired of ["git clone", "npm ci", "spawnSync", "mkdtemp", "btoa", "--input-type=module"]) {
 			expect(source, `catalog-sync still references "${retired}"`).not.toContain(retired);
 		}
+	});
+
+	it("sends a command a human can read and audit before it runs", () => {
+		const source = readFileSync(repoPath("plugins", PLUGIN_ID, "src", "client.ts"), "utf8");
+		expect(source, "the private bridge must be named and explained, not smuggled in").toContain(RETIRED_EVENT);
+		expect(source).toMatch(/only way to reach a build-capable install|never passes --build/);
 	});
 
 	it("tells the user to install with --build instead of the old bootstrap dance", () => {
