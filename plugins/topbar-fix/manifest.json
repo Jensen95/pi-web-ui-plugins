@@ -1,0 +1,12 @@
+{
+	"id": "topbar-fix",
+	"name": "Top Bar Fix",
+	"version": "0.1.0",
+	"icon": "🩹",
+	"description": "Stopgap stylesheet for pi-web-ui issue 162: the top-bar overflow menu is clipped by .view-switch and can never be seen. Delete this plugin once the fix ships upstream.",
+	"build": {
+		"install": "npm install --ignore-scripts --no-audit --no-fund esbuild@0.28.2",
+		"command": "npx --no-install esbuild src/client.ts --bundle --platform=browser --format=esm --target=es2022 --loader:.css=text --external:./vendor/* --outfile=client/entry.mjs",
+		"outputs": ["client/entry.mjs"]
+	}
+}

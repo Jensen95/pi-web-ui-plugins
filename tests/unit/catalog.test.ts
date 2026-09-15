@@ -16,7 +16,7 @@ import { findCjk, formatCjkHits, repoPath } from "../helpers/repo-files";
 
 const CATALOG_REL = "plugins/catalog.json";
 
-/** The eleven plugins this repo ships. legado-web and demo-mailbox are not ported. */
+/** The twelve plugins this repo ships. legado-web and demo-mailbox are not ported. */
 const EXPECTED_IDS = [
 	"catalog-sync",
 	"db-client",
@@ -25,6 +25,7 @@ const EXPECTED_IDS = [
 	"mcp-manager",
 	"mermaid",
 	"run-trace",
+	"topbar-fix",
 	"ui-shortcuts",
 	"vscode-editor",
 	"webmail",
@@ -84,7 +85,7 @@ describe("plugins/catalog.json", () => {
 		expect((parsed as unknown[]).length).toBe(EXPECTED_IDS.length);
 	});
 
-	it("lists exactly the eleven plugins this repo ships", () => {
+	it("lists exactly the twelve plugins this repo ships", () => {
 		const ids = readCatalog()
 			.map((entry) => entry.id)
 			.sort();

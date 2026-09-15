@@ -11,6 +11,7 @@ These are English-only TypeScript ports of the upstream plugins. See
 
 | id                  | icon | What it does                                                                                                                 | Permissions                               |
 | ------------------- | ---- | ---------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
+| `topbar-fix`        | 🩹   | Stopgap stylesheet for pi-web-ui#162: the top-bar overflow menu is clipped and never visible. Temporary.                     | none                                      |
 | `catalog-sync`      | 🔄   | Settings page (no tab) that writes this repository's plugin list into the marketplace (`host.reloadCatalog`).                | none                                      |
 | `jira-review`       | 🎟️   | Reviews active Jira Cloud sprint tickets, saves agent-readiness scores, and manually posts approved notes.                   | `fs`, `net`, `tools`                      |
 | `webmail`           | 📬   | IMAP inbox, SMTP sending and new-mail notifications, with an optional switch that lets the agent manage the mailbox.         | `net:imap/smtp`, `tools`                  |

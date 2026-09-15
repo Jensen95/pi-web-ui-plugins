@@ -33,6 +33,7 @@ const EXPECTED_PLUGIN_IDS = [
 	"mcp-manager",
 	"mermaid",
 	"run-trace",
+	"topbar-fix",
 	"ui-shortcuts",
 	"vscode-editor",
 	"webmail",
@@ -102,7 +103,7 @@ function withTempDir<T>(run: (dir: string) => T): T {
 }
 
 describe("plugin skeleton", () => {
-	it("contains exactly the eleven expected plugin directories", () => {
+	it("contains exactly the twelve expected plugin directories", () => {
 		expect(pluginIds()).toEqual(EXPECTED_PLUGIN_IDS);
 	});
 

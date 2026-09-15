@@ -86,5 +86,13 @@
 		"description": "Assemble selected workspace folders and Git repositories into a fresh multi-project worktree folder.",
 		"source": "Jensen95/pi-web-ui-plugins/plugins/worktree-preparer",
 		"homepage": "https://github.com/Jensen95/pi-web-ui-plugins/tree/main/plugins/worktree-preparer"
+	},
+	{
+		"id": "topbar-fix",
+		"name": "Top Bar Fix",
+		"icon": "🩹",
+		"description": "Stopgap stylesheet for pi-web-ui issue 162: the top-bar overflow menu is clipped by .view-switch and can never be seen. Remove once fixed upstream.",
+		"source": "Jensen95/pi-web-ui-plugins/plugins/topbar-fix",
+		"homepage": "https://github.com/Jensen95/pi-web-ui-plugins/tree/main/plugins/topbar-fix"
 	}
 ]
