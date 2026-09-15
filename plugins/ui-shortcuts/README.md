@@ -19,7 +19,7 @@ The **Custom shortcuts** panel stores additional bindings in browser local stora
 - **Start a new chat**: create a new conversation and send a prompt.
 
 The plugin uses pi-web-ui's browser host action bridge. Missing or failing bridge methods are ignored safely. Install it with
-`catalog-sync`, or build it locally first:
+`pi-web-ui install Jensen95/pi-web-ui-plugins/plugins/ui-shortcuts --build`, or build it locally first:
 
 ```sh
 npm run build:ui-shortcuts

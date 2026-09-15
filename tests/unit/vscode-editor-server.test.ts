@@ -559,7 +559,7 @@ describe("vscode-editor manifest", () => {
 	});
 
 	it("adds no manifest key the upstream plugin did not have", () => {
-		expect(Object.keys(plugin.raw).sort()).toEqual(["description", "id", "name", "permissions", "version"]);
+		expect(Object.keys(plugin.raw).sort()).toEqual(["build", "description", "id", "name", "permissions", "version"]);
 	});
 });
 

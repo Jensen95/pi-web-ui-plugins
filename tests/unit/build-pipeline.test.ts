@@ -15,7 +15,6 @@ import { listPlugins } from "../helpers/plugin-contract";
 import { REPO_ROOT, isGitIgnored, repoPath } from "../helpers/repo-files";
 
 const BUILD_SCRIPTS = ["build-plugins.mjs", "build-mermaid-vendor.mjs", "build-runtrace-vendor.mjs"];
-const BOOTSTRAP_ARTIFACT_PREFIX = "plugins/catalog-sync/";
 
 /** Read once: no test adds or removes a plugin directory. */
 const plugins = listPlugins();
@@ -164,11 +163,9 @@ describe("per-plugin build", () => {
 			if (other.dirName === target.dirName) continue;
 			expect(result.stdout, `single-plugin build touched ${other.dirName}`).not.toContain(`${other.dirName}:`);
 		}
-		// Every artifact it reports is part of the direct-install payload.
+		// Everything it writes is build output; the host rebuilds it on install.
 		for (const artifact of result.artifacts) {
-			expect(isGitIgnored(artifact), `${artifact} bootstrap policy`).toBe(
-				!artifact.startsWith(BOOTSTRAP_ARTIFACT_PREFIX),
-			);
+			expect(isGitIgnored(artifact), `${artifact} must be gitignored`).toBe(true);
 		}
 	});
 
@@ -177,10 +174,9 @@ describe("per-plugin build", () => {
 			const { server, client } = artifactRelPaths(plugin.dirName);
 			expect(server).toBe(`plugins/${plugin.dirName}/index.mjs`);
 			expect(client).toBe(`plugins/${plugin.dirName}/client/entry.mjs`);
-			// The bootstrap entry is tracked; catalog-sync builds every other plugin
-			// before handing its local directory to the host installer.
+			// Both are build output: `install --build` regenerates them on the host.
 			expect(isGitIgnored(server)).toBe(true);
-			expect(isGitIgnored(client)).toBe(!client.startsWith(BOOTSTRAP_ARTIFACT_PREFIX));
+			expect(isGitIgnored(client)).toBe(true);
 		}
 	});
 
@@ -213,9 +209,7 @@ describe("per-plugin build", () => {
 			// The host hardcodes these filenames, so a rebuild must not move them.
 			expect(second.artifacts).toEqual(paths);
 			for (const artifact of paths) {
-				expect(isGitIgnored(artifact), `${artifact} bootstrap policy`).toBe(
-					!artifact.startsWith(BOOTSTRAP_ARTIFACT_PREFIX),
-				);
+				expect(isGitIgnored(artifact), `${artifact} must be gitignored`).toBe(true);
 			}
 		},
 	);

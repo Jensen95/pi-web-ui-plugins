@@ -19,11 +19,10 @@ describe("image-toolkit distribution", () => {
 		expect(manifest).not.toHaveProperty("descriptionEn");
 	});
 
-	it("documents the bootstrap install and source-only catalog workflow", () => {
+	it("documents the source-only install and catalog workflow", () => {
 		const readme = read("README.md");
-		expect(readme).toContain("pi-web-ui install Jensen95/pi-web-ui-plugins/plugins/catalog-sync");
+		expect(readme).toContain("pi-web-ui install Jensen95/pi-web-ui-plugins/plugins/catalog-sync --build");
 		expect(readme).toContain("source-only");
-		expect(readme).toContain("temporary checkout");
 		expect(readme).not.toContain("DOES NOT WORK");
 	});
 

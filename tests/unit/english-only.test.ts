@@ -74,12 +74,16 @@ describe("English-only invariant", () => {
 		expect(isVendorPath("plugins/mermaid/manifest.json")).toBe(false);
 	});
 
-	it("includes every non-ignored compiled entry in the tracked-file pass", () => {
-		const built = listCompiledEntries().filter((entry) => !isGitIgnored(entry));
+	it("scans compiled entries separately, because every one of them is gitignored", () => {
+		// All build output is ignored now that the host rebuilds it on install, so
+		// repoFiles() never sees an artifact; listCompiledEntries() is the only way a
+		// stale hand-written .mjs would still be scanned.
+		const compiled = listCompiledEntries();
+		expect(compiled.length, "no compiled entries found - run npm run build first").toBeGreaterThan(0);
 		const tracked = repoFiles();
-		expect(built).toContain("plugins/catalog-sync/client/entry.mjs");
-		for (const entry of built) {
-			expect(tracked, `${entry} is absent from the repo file pass`).toContain(entry);
+		for (const entry of compiled) {
+			expect(isGitIgnored(entry), `${entry} must be build output`).toBe(true);
+			expect(tracked, `${entry} must not be part of the repo file pass`).not.toContain(entry);
 		}
 	});
 

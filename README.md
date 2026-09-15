@@ -11,7 +11,7 @@ These are English-only TypeScript ports of the upstream plugins. See
 
 | id                  | icon | What it does                                                                                                                 | Permissions                               |
 | ------------------- | ---- | ---------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
-| `catalog-sync`      | 🔄   | Lets you select source-only plugins to build, install, or update from a temporary checkout.                                  | none                                      |
+| `catalog-sync`      | 🔄   | Writes this repository's plugin list into the marketplace with one button (`host.reloadCatalog`).                            | none                                      |
 | `jira-review`       | 🎟️   | Reviews active Jira Cloud sprint tickets, saves agent-readiness scores, and manually posts approved notes.                   | `fs`, `net`, `tools`                      |
 | `webmail`           | 📬   | IMAP inbox, SMTP sending and new-mail notifications, with an optional switch that lets the agent manage the mailbox.         | `net:imap/smtp`, `tools`                  |
 | `db-client`         | 🗄️   | Schema browsing, SQL queries and row editing across MySQL, PostgreSQL, SQLite, SQL Server, MongoDB and Redis.                | `net`, `tools`                            |
@@ -43,24 +43,29 @@ Load `plugins/page-picker/extension/` as an unpacked extension after building (o
 
 ## Installing plugins
 
-`catalog-sync` is the tracked bootstrap entry. It clones this repository, runs the shared build once, and installs the
-selected source-only plugin directories from that temporary checkout. Install the bootstrap with its repository subdirectory:
+This repository is source-only: no build output is committed. pi-web-ui 0.86 builds a plugin during installation, in an
+isolated temporary directory, from the `build` block in its `manifest.json`. Requires pi-web-ui 0.86 or newer.
 
 ```sh
-pi-web-ui install Jensen95/pi-web-ui-plugins/plugins/catalog-sync
+pi-web-ui install Jensen95/pi-web-ui-plugins/plugins/<id> --build
 ```
 
-To refresh the custom catalog, install `catalog-sync`, open its view, and choose **Sync catalog**; this writes the catalog without installing anything.
-To install or update plugins, check their cards and choose **Install/update selected**. Entries start unchecked.
+In the browser the same thing is **Settings → UI plugins → Plugin marketplace**, with **Build from source** ticked.
+Without `--build` (or that checkbox) the plugin installs with no compiled entries and does nothing.
+
+To get every plugin listed in the marketplace at once, install `catalog-sync` and press **Sync catalog**:
+
+```sh
+pi-web-ui install Jensen95/pi-web-ui-plugins/plugins/catalog-sync --build
+```
 
 ### Custom catalogs
 
 Recent pi-web-ui versions support custom catalog entries. Open **Settings → UI plugins → Plugin marketplace →
 Add plugin** and enter a source such as `Jensen95/pi-web-ui-plugins/plugins/image-toolkit`. Entries are stored
 in `~/.pi-web/plugin-catalog.json` (or `<dataDir>/plugin-catalog.json`) and appear alongside the built-in catalog.
-For this source-only repository, install `catalog-sync` and use its selector instead of installing a listed source directly.
 
-To load this repository's complete catalog as a custom catalog:
+To load this repository's complete catalog as a custom catalog without the plugin:
 
 ```sh
 mkdir -p ~/.pi-web
@@ -68,10 +73,9 @@ curl -fsSL https://raw.githubusercontent.com/Jensen95/pi-web-ui-plugins/main/plu
  jq '{entries: .}' > ~/.pi-web/plugin-catalog.json
 ```
 
-Refresh pi-web-ui after writing the file, then install `catalog-sync`. Use **Sync catalog** to refresh the marketplace
-without installing plugins, or select plugin cards and use **Install/update selected** to build and install them. The release workflow remains available for tagged archives,
-but a release is not required for installation. Runtime packages for plugins that need them are installed by pi-web-ui
-on first activation via `ensureDeps`.
+Refresh pi-web-ui after writing the file. `catalog-sync` does the same thing from the UI, with validation and an atomic
+write. The release workflow remains available for tagged archives, but a release is not required for installation.
+Runtime packages for plugins that need them are installed by pi-web-ui on first activation via `ensureDeps`.
 
 ## Development
 
@@ -127,9 +131,11 @@ plugins/<id>/
   client/vendor/*      GENERATED  - ignored, third-party bundles
 ```
 
-`plugins/catalog-sync/client/entry.mjs` is the one tracked bootstrap exception. Its update command clones the repository,
-runs `npm ci` and `npm run build`, then installs the selected generated local directories. The Page Picker extension is built
-separately from its TypeScript sources.
+No artifact is committed. Each `manifest.json` carries a `build` block (`install` / `command` / `outputs`) that the host
+runs during `install --build`; it is the same esbuild configuration as the repo builder, expressed as CLI flags, because
+the host copies only the plugin directory and the repo root is not there. `tests/unit/source-install.test.ts` derives
+that block from the conventions and fails when the two drift. The Page Picker extension is built separately from its
+TypeScript sources.
 
 `scripts/build-plugins.mjs` is convention-driven: one shared builder walks `plugins/*/`, and there are no
 per-plugin build files or `package.json` files. Server bundles keep npm specifiers external
@@ -166,8 +172,8 @@ implementations of `webmail`, `db-client`, `vscode-editor`, `mermaid`, `run-trac
 come from. This repository ports them to English and converts the plugin and extension sources to TypeScript. The
 Page Picker remains a separate browser-side deliverable rather than a catalog plugin.
 
-`catalog-sync` and `mcp-manager` are original to this repository. `catalog-sync` provides the current best-effort
-terminal bridge because the upstream host has not exposed a supported catalog reload API.
+`catalog-sync` and `mcp-manager` are original to this repository. `catalog-sync` is now a thin wrapper over the
+supported `host.reloadCatalog` API; it exists only because the host has no user-facing field for a remote catalog URL.
 
 The upstream copyright notice, which MIT requires be carried into derivative works:
 

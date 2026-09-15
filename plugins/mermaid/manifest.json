@@ -4,5 +4,10 @@
 	"version": "1.0.0",
 	"description": "Renders mermaid fences in messages to SVG diagrams (fenced-code renderer plugin, offline-first local engine)",
 	"view": false,
-	"renderers": ["mermaid"]
+	"renderers": ["mermaid"],
+	"build": {
+		"install": "npm install --ignore-scripts --no-audit --no-fund esbuild@0.28.2",
+		"command": "npx --no-install esbuild src/client.ts --bundle --platform=browser --format=esm --target=es2022 --loader:.css=text --external:./vendor/* --outfile=client/entry.mjs",
+		"outputs": ["client/entry.mjs"]
+	}
 }

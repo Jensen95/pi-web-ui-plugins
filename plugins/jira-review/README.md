@@ -17,7 +17,8 @@ draft comment and then adds the `dogits-dans-le-nez` Jira label.
 
 ## Setup
 
-Install it with `catalog-sync`, which builds this source-only plugin before handing it to pi-web-ui. For local development:
+Install it with `pi-web-ui install Jensen95/pi-web-ui-plugins/plugins/jira-review --build`, which builds this source-only
+plugin on the host. For local development:
 
 ```sh
 npm run build:jira-review

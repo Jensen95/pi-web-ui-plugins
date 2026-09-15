@@ -70,7 +70,7 @@ describe("manifest", () => {
 	});
 
 	it("declares exactly the fields upstream declared - no permissions, no view flag, no renderers", () => {
-		expect(Object.keys(plugin.raw).sort()).toEqual(["description", "icon", "id", "name", "version"]);
+		expect(Object.keys(plugin.raw).sort()).toEqual(["build", "description", "icon", "id", "name", "version"]);
 		expect(plugin.manifest.permissions).toBeUndefined();
 		expect(plugin.manifest.view).toBeUndefined();
 		expect(plugin.manifest.renderers).toBeUndefined();

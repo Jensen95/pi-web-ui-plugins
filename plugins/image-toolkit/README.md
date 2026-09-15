@@ -4,7 +4,8 @@ Image Toolkit is an image workbench combining compression, cropping, resizing, r
 
 Processing runs in the browser with Canvas. The plugin supports workspace import/export, drag-and-drop, clipboard paste, ZIP export, per-image settings, undo/redo, crop shapes, resizing, filters, metadata and EXIF inspection, and text or image watermarks. Server-side processing supports PNG, JPEG and BMP; JPEG processing may install the pure-JavaScript `jpeg-js` package.
 
-Install it with `catalog-sync`, which builds this source-only plugin before handing it to pi-web-ui. For local development:
+Install it with `pi-web-ui install Jensen95/pi-web-ui-plugins/plugins/image-toolkit --build`, which builds this source-only
+plugin on the host. For local development:
 
 ```sh
 npm run build:image-toolkit

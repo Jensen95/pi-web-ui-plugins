@@ -423,7 +423,7 @@ describe("webmail manifest", () => {
 	it("carries neither a descriptionEn key nor an id", () => {
 		expect(raw.descriptionEn).toBeUndefined();
 		expect(raw.id).toBeUndefined();
-		expect(Object.keys(raw).sort()).toEqual(["description", "name", "permissions", "version"]);
+		expect(Object.keys(raw).sort()).toEqual(["build", "description", "name", "permissions", "version"]);
 	});
 });
 

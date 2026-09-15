@@ -164,7 +164,7 @@ describe("db-client manifest", () => {
 	});
 
 	it("carries no locale fallback key and no view/renderer flags upstream did not have", () => {
-		expect(Object.keys(loaded.raw).sort()).toEqual(["description", "id", "name", "permissions", "version"]);
+		expect(Object.keys(loaded.raw).sort()).toEqual(["build", "description", "id", "name", "permissions", "version"]);
 		expect(loaded.raw).not.toHaveProperty("descriptionEn");
 	});
 });

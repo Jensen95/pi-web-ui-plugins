@@ -1,29 +1,41 @@
 # Plugin Catalog Sync
 
-Provides a selectable list of this repository's custom plugin sources from:
+Writes this repository's plugin list into the pi-web-ui marketplace, from:
 
 ```text
 https://raw.githubusercontent.com/Jensen95/pi-web-ui-plugins/main/plugins/catalog.json
 ```
 
+Requires pi-web-ui 0.86 or newer (host API 4+, which added `host.reloadCatalog`).
+
 ## Use
 
-The page shows each plugin as a card with its name, description, source, and an unchecked selection box.
+One button: **Sync catalog**. It calls `host.reloadCatalog(<catalog URL>, { replace: true })`. The server fetches the
+document, validates every entry with the same rules the marketplace "Add plugin" form uses, writes
+`<dataDir>/plugin-catalog.json` atomically, reloads plugins, and returns a receipt the view shows you. A failed fetch or
+a malformed document writes nothing, so the previous catalog stays valid.
 
-- Choose **Sync catalog** to fetch and write the complete `plugin-catalog.json`. This does not install any plugin.
-- Check plugins and choose **Install/update selected** to clone the repository, run `npm ci` and `npm run build`, and install only those plugins.
+Nothing is installed. After syncing, install the plugins you want from **Settings -> UI plugins -> Plugin marketplace**
+with **Build from source** ticked, or from a terminal:
 
-The install/update command also refreshes the complete catalog after every selected install succeeds. It updates this
-plugin itself only when `catalog-sync` is selected. The first use still requires the one-time direct bootstrap install
-because the host has no supported catalog-write API.
+```bash
+pi-web-ui install Jensen95/pi-web-ui-plugins/plugins/<id> --build
+```
 
-The command uses Node's built-in `fetch`, Git, npm and `pi-web-ui`; it does not require `curl` or `jq`. The catalog is deliberately restricted to this repository's `plugins/<id>` sources so the temporary checkout can build them together.
+## What this plugin used to do
 
-## Limitation
+Before 0.86 it cloned this repository into a temporary directory, ran `npm ci` and the repository build, and installed
+each plugin through the private `pi-web-ui:plugin-run-command` terminal event, because the host had no catalog-write API
+and could not build a source-only plugin. Upstream now does both itself
+([#148](https://github.com/xing-shuyin/pi-web-ui/issues/148), [#150](https://github.com/xing-shuyin/pi-web-ui/issues/150)),
+so all of that is gone.
 
-The pi-web-ui plugin API has no supported catalog-write or reload method yet. This plugin therefore uses the private host event `pi-web-ui:plugin-run-command`, the same event used by existing update buttons. The status only confirms that the request was dispatched; the browser cannot detect whether an older host handled the event.
+What remains missing upstream is a user-facing field for a remote catalog URL; that is the only reason this plugin still
+exists. Install it once from source:
 
-Refresh the page after the command completes if the host does not automatically update its plugin list. The temporary checkout is removed on success or failure, and the old catalog is retained when any fetch, build or install step fails. The command uses `&&`, so a Windows host using legacy PowerShell should run the plugin from Git Bash or modern PowerShell.
+```bash
+pi-web-ui install Jensen95/pi-web-ui-plugins/plugins/catalog-sync --build
+```
 
 ## Development
 

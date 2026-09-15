@@ -18,9 +18,8 @@ Driver dependencies are **not bundled**. First activation installs them into the
 ## Install, update, and uninstall
 
 ```bash
-# Install the catalog-sync selector
-pi-web-ui install Jensen95/pi-web-ui-plugins/plugins/catalog-sync
-# Open catalog-sync, select this plugin, and choose "Update selected plugins"
+# Install from source; --build compiles it on the host
+pi-web-ui install Jensen95/pi-web-ui-plugins/plugins/db-client --build
 # Local development: build this plugin before installing its directory
 npm run build:db-client
 pi-web-ui install plugins/db-client
@@ -29,7 +28,7 @@ pi-web-ui install plugins/db-client
 # Inspect installed plugins
 pi-web-ui plugins
 
-# Select this plugin in catalog-sync to rebuild and reinstall it, or rebuild locally.
+# Re-run the install command above with --force to update it.
 # Back up db-connections.json in the plugin directory first.
 
 # Uninstall (also deletes db-connections.json)

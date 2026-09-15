@@ -2,5 +2,10 @@
 	"name": "Webmail",
 	"version": "0.2.0",
 	"description": "IMAP/SMTP email management with inbox browsing, search, reading, sending, new-mail notifications, and optional AI management.",
-	"permissions": ["net:imap/smtp", "tools"]
+	"permissions": ["net:imap/smtp", "tools"],
+	"build": {
+		"install": "npm install --ignore-scripts --no-audit --no-fund esbuild@0.28.2",
+		"command": "npx --no-install esbuild src/index.ts --bundle --platform=node --format=esm --target=es2022 --packages=external --outfile=index.mjs && npx --no-install esbuild src/client.ts --bundle --platform=browser --format=esm --target=es2022 --loader:.css=text --external:./vendor/* --outfile=client/entry.mjs",
+		"outputs": ["index.mjs", "client/entry.mjs"]
+	}
 }

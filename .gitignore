@@ -21,11 +21,10 @@ plugins/*/storage/
 # ---------------------------------------------------------------------------
 # Generated plugin artifacts.
 #
-# catalog-sync is the tracked bootstrap; it clones this repo, builds it and
-# installs the generated plugin directories. Keep every other build output out
-# of source-only plugin directories and release commits.
+# Nothing built is committed: pi-web-ui >= 0.86 installs these plugins from
+# source with `install --build`, running each manifest's own build block in an
+# isolated temporary directory.
 # ---------------------------------------------------------------------------
 plugins/*/index.mjs
 plugins/*/client/entry.mjs
 plugins/*/client/vendor/
-!plugins/catalog-sync/client/entry.mjs

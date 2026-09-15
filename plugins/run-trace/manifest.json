@@ -3,5 +3,10 @@
 	"name": "Run Trace",
 	"version": "0.1.0",
 	"icon": "🧭",
-	"description": "A replayable run trajectory and timeline of agent work, from task intake through reasoning, tool calls, file changes, and results."
+	"description": "A replayable run trajectory and timeline of agent work, from task intake through reasoning, tool calls, file changes, and results.",
+	"build": {
+		"install": "npm install --ignore-scripts --no-audit --no-fund esbuild@0.28.2",
+		"command": "npx --no-install esbuild src/index.ts --bundle --platform=node --format=esm --target=es2022 --packages=external --outfile=index.mjs && npx --no-install esbuild src/client.ts --bundle --platform=browser --format=esm --target=es2022 --loader:.css=text --external:./vendor/* --outfile=client/entry.mjs",
+		"outputs": ["index.mjs", "client/entry.mjs"]
+	}
 }

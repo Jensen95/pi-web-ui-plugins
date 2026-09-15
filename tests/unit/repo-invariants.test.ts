@@ -351,33 +351,20 @@ describe("TypeScript layout", () => {
 		expect(obsolete, `dependencies live in the root package.json:\n${obsolete.join("\n")}`).toEqual([]);
 	});
 
-	it("commits only the bootstrap artifact required for the first install", () => {
-		const tracked = gitFilesCached();
-		const bootstrap = "plugins/catalog-sync/client/entry.mjs";
-		const generated = tracked.filter((file) =>
+	it("commits no build output: every plugin is installed from source with --build", () => {
+		const generated = gitFilesCached().filter((file) =>
 			/^plugins\/[^/]+\/(?:index\.mjs|client\/entry\.mjs|client\/vendor\/)/.test(file),
 		);
-		const unexpected = generated.filter((file) => !file.startsWith("plugins/catalog-sync/"));
-		expect(tracked).toContain(bootstrap);
-		expect(isGitIgnored(bootstrap)).toBe(false);
-		expect(unexpected, `source-only output must not be committed:\n${unexpected.join("\n")}`).toEqual([]);
+		expect(generated, `build output must not be committed:\n${generated.join("\n")}`).toEqual([]);
 	});
 });
 
 describe("compiled artifacts", () => {
-	it("keeps the bootstrap client entry available for the first install", () => {
-		const artifact = "plugins/catalog-sync/client/entry.mjs";
-		expect(existsSync(repoPath(artifact))).toBe(true);
-		expect(isGitIgnored(artifact)).toBe(false);
-	});
-
-	it("keeps source-only compiled entries out of the committed payload", () => {
-		const tracked = gitFilesCached();
-		const generated = tracked.filter((file) =>
+	it("keeps every compiled entry out of the committed payload", () => {
+		const generated = gitFilesCached().filter((file) =>
 			/^plugins\/[^/]+\/(?:index\.mjs|client\/entry\.mjs|client\/vendor\/)/.test(file),
 		);
-		const sourceOnly = generated.filter((file) => !file.startsWith("plugins/catalog-sync/"));
-		expect(sourceOnly, `source-only output must be ignored:\n${sourceOnly.join("\n")}`).toEqual([]);
+		expect(generated, `compiled output must be ignored:\n${generated.join("\n")}`).toEqual([]);
 	});
 
 	it("are regenerable from committed sources alone", () => {
@@ -503,9 +490,9 @@ describe("licence and attribution", () => {
 
 	it("states the direct GitHub install story in the README", () => {
 		const readme = readFileSync(repoPath("README.md"), "utf8");
-		expect(readme).toContain("pi-web-ui install Jensen95/pi-web-ui-plugins/plugins/catalog-sync");
+		expect(readme).toContain("pi-web-ui install Jensen95/pi-web-ui-plugins/plugins/catalog-sync --build");
 		expect(readme).toMatch(/source-only/i);
-		expect(readme).toMatch(/temporary checkout/i);
+		expect(readme, "README must state the minimum host version").toContain("0.86");
 		expect(readme).toMatch(/release workflow/i);
 		expect(readme).toMatch(/English-only/i);
 	});
