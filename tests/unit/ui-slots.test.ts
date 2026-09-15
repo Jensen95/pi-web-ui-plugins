@@ -25,13 +25,17 @@ import { describe, expect, it } from "vitest";
 import { listPlugins } from "../helpers/plugin-contract";
 import { repoPath } from "../helpers/repo-files";
 
-/** Plugins that belong in the top-bar overflow menu rather than only in a tab:
- *  occasional-use utilities, not things you sit inside while working. */
-const OVERFLOW_PLUGINS = ["mcp-manager", "ui-shortcuts"];
-
-/** Plugins that are a settings page and nothing else: too small to deserve a
- *  view of their own. catalog-sync is one button. */
-const SETTINGS_PAGE_PLUGINS = ["catalog-sync"];
+/**
+ * Plugins that are a settings page and nothing else: configuration surfaces you
+ * visit and leave, not views you work inside.
+ *
+ * They are NOT in the top-bar overflow menu either, for two reasons: an entry in
+ * both places is the same plugin listed twice, and the host's overflow menu is
+ * currently unreachable anyway - `.plugin-topbar-menu` is `position: absolute`
+ * inside `.topbar-actions`, which is a clipping context
+ * (`overflow-x: auto; overflow-y: hidden`), so the menu renders and is cut off.
+ */
+const SETTINGS_PAGE_PLUGINS = ["catalog-sync", "mcp-manager", "ui-shortcuts"];
 
 const ID_RE = /^[A-Za-z0-9_-]+$/;
 const UI_KINDS = new Set(["view", "action", "badge", "menu", "page", "organizer", "divider"]);
@@ -106,26 +110,15 @@ export function rejectionReason(item: UiItem, slot: string): string | undefined 
 
 const plugins = listPlugins();
 
-describe("top-bar overflow entries", () => {
-	it("puts the occasional-use plugins in the overflow menu", () => {
-		for (const dirName of OVERFLOW_PLUGINS) {
-			const manifest = manifestOf(dirName);
-			const items = manifest.ui?.["topbar.overflow"];
-			expect(Array.isArray(items), `plugins/${dirName} declares no topbar.overflow items`).toBe(true);
-			expect((items as unknown[]).length).toBe(1);
-		}
-	});
-
-	it("opens the plugin's own view, the same target as its tab", () => {
-		for (const dirName of OVERFLOW_PLUGINS) {
-			const manifest = manifestOf(dirName);
-			const item = (manifest.ui?.["topbar.overflow"] as UiItem[])[0] as UiItem;
-			expect(item.kind, `${dirName} overflow entry must be a view entry`).toBe("view");
-			// No explicit view: the host then routes to `plugin:<pluginId>` itself,
-			// so the id can never drift away from the plugin it opens.
-			expect(item.view).toBeUndefined();
-			expect(item.action).toBeUndefined();
-			expect(item.label).toBe(manifest.name);
+describe("ui contributions", () => {
+	it("declares no top-bar overflow entry while the host clips that menu", () => {
+		// Re-add these once the overflow menu escapes its clipping ancestor; until
+		// then an entry there is invisible, and the same plugin is already a page.
+		for (const plugin of plugins) {
+			expect(
+				manifestOf(plugin.dirName).ui?.["topbar.overflow"],
+				`plugins/${plugin.dirName} puts an entry in a menu the host cannot show`,
+			).toBeUndefined();
 		}
 	});
 
@@ -164,10 +157,15 @@ describe("top-bar overflow entries", () => {
 		}
 	});
 
-	it("adds no overflow entry for the plugins meant to stay out of the menu", () => {
+	it("lists each plugin in exactly one place", () => {
 		for (const plugin of plugins) {
-			if (OVERFLOW_PLUGINS.includes(plugin.dirName)) continue;
-			expect(manifestOf(plugin.dirName).ui?.["topbar.overflow"]).toBeUndefined();
+			const manifest = manifestOf(plugin.dirName) as RawManifest & { view?: unknown };
+			const slots = Object.keys(manifest.ui ?? {}).filter((slot) => slot !== "arrange" && slot !== "items");
+			const hasTab = manifest.view !== false;
+			expect(
+				slots.length + (hasTab ? 1 : 0),
+				`plugins/${plugin.dirName} appears in ${slots.join(", ")}${hasTab ? " and the top-bar tabs" : ""}`,
+			).toBeLessThanOrEqual(1);
 		}
 	});
 });
@@ -187,7 +185,8 @@ describe("settings-page-only plugins", () => {
 		for (const dirName of SETTINGS_PAGE_PLUGINS) {
 			const manifest = manifestOf(dirName) as RawManifest & { view?: unknown };
 			// The host renders a tab for every plugin whose manifest view is not false,
-			// and skips preloading its bundle when it is - the page mounts on demand.
+			// and skips preloading its bundle when it is - the page mounts on demand
+			// (PluginPage imports client/entry.mjs itself and only needs hasClient).
 			expect(manifest.view, `plugins/${dirName} still claims a view`).toBe(false);
 			expect(manifest.ui?.["topbar.overflow"]).toBeUndefined();
 			expect(manifest.ui?.["topbar.primary"]).toBeUndefined();

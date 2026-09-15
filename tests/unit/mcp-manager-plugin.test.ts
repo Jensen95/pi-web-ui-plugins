@@ -135,9 +135,12 @@ describe("manifest", () => {
 		expect(plugin.manifest.permissions).not.toContain("http");
 	});
 
-	it("is a view plugin with no fence renderers", () => {
-		expect(plugin.manifest.view ?? true).toBe(true);
+	it("is a settings page, not a top-bar view, and renders no fences", () => {
+		// view:false drops the tab and the eager bundle preload; the settings page
+		// declared in manifest.ui mounts the same client entry on demand.
+		expect(plugin.manifest.view).toBe(false);
 		expect(plugin.manifest.renderers).toBeUndefined();
+		expect(plugin.hasClientSource, "a settings page still needs a client to mount").toBe(true);
 	});
 
 	it("ships an English README that credits the adapter and warns about /reload", () => {

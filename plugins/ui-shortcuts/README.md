@@ -2,7 +2,7 @@
 
 Adds global keyboard shortcuts for the pi-web-ui views:
 
-It also registers itself in the top bar's overflow menu (`⋯`), next to the other occasional-use plugin views.
+It has no top-bar tab (`"view": false`); its bindings live in **Settings → UI Shortcuts**.
 
 | Shortcut                   | View                     |
 | -------------------------- | ------------------------ |
