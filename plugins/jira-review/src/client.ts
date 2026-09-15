@@ -198,6 +198,17 @@ export default {
 		const document = container.ownerDocument;
 		let state: ReviewState = {};
 		const page: Page = isSettingsSurface(container) ? "settings" : "dashboard";
+		/**
+		 * Set by a confirmed save, so the form renders empty instead of echoing the
+		 * credentials back.
+		 *
+		 * It stays set for the life of this mount on purpose: the server sends
+		 * `result ok:true` and then a `state` carrying the saved config, so resetting
+		 * on `state` would re-fill the form a moment after clearing it. Leaving and
+		 * reopening the settings page remounts and prefills again, which is the way
+		 * back to editing a saved value.
+		 */
+		let savedAndCleared = false;
 		let selectedFolders: string[] = [];
 		let ticketFolderInputs = new Map<string, HTMLInputElement>();
 		const bridge =
@@ -223,7 +234,10 @@ export default {
 			form.dataset.ui = "jira-settings";
 			form.className = "jira-review__settings";
 			const fields = new Map<string, SettingsField>();
-			const config = state.config ?? {};
+			// Blank after a confirmed save: the values live in the plugin's server-side
+			// storage and secret store, so leaving them on screen only re-exposes
+			// credentials nobody needs to read back.
+			const config = savedAndCleared ? {} : (state.config ?? {});
 			appendSettingsField(document, form, fields, "siteUrl", "Jira Cloud site URL", config.siteUrl ?? "");
 			appendSettingsField(document, form, fields, "email", "Account email", config.email ?? "");
 			appendSettingsField(document, form, fields, "apiToken", "API token", "", "password");
@@ -236,7 +250,7 @@ export default {
 				fields,
 				"readyJql",
 				"Ready-ticket JQL",
-				config.readyJql || DEFAULT_READY_JQL,
+				savedAndCleared ? "" : config.readyJql || DEFAULT_READY_JQL,
 				"textarea",
 				true,
 			);
@@ -261,7 +275,7 @@ export default {
 					},
 					token: value("apiToken"),
 				});
-				render();
+				// Not cleared here: only the server's ok:true result means it landed.
 			});
 
 			root.append(style(), header, form);
@@ -416,12 +430,24 @@ export default {
 
 		const off = ctx.onData((payload) => {
 			if (!payload || typeof payload !== "object") return;
-			const message = payload as { kind?: unknown; state?: ReviewState; error?: unknown };
+			const message = payload as {
+				kind?: unknown;
+				state?: ReviewState;
+				error?: unknown;
+				ok?: unknown;
+				action?: unknown;
+			};
 			if (message.kind === "state") {
 				state = message.state ?? {};
 				render();
 			} else if (message.kind === "result" && typeof message.error === "string") {
 				state = { ...state, error: message.error };
+				render();
+			} else if (message.kind === "result" && message.ok === true && message.action === "save_config") {
+				// The one unambiguous "your save landed" signal: it is sent to the saving
+				// client only, while a state broadcast also fires on refresh and attach.
+				savedAndCleared = true;
+				state = { ...state, error: undefined };
 				render();
 			}
 		});

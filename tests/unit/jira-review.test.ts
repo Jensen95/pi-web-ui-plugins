@@ -395,6 +395,59 @@ describe("Jira review client", () => {
 		expect(descendants(container).some((element) => element.dataset.ui === "jira-settings")).toBe(false);
 	});
 
+	it("clears the form once the server confirms the save", () => {
+		const { ctx, push } = createMockViewContext("jira-review");
+		const document = createFakeDocument();
+		const container = settingsContainer(document);
+		jiraClient.mount?.(container as unknown as HTMLElement, ctx);
+		push({ kind: "state", state: { configured: true, config: CONFIG } });
+
+		// Saved values are prefilled while editing...
+		const before = descendants(container).filter((element) => element.dataset.field);
+		expect(before.find((element) => element.dataset.field === "siteUrl")?.value).toBe(CONFIG.siteUrl);
+
+		// ...and gone once the server says the save landed. `result ok:true` is the
+		// only unambiguous per-client success signal: a `state` broadcast also
+		// arrives on refresh, on attach, and from other clients.
+		push({ kind: "result", ok: true, action: "save_config" });
+
+		const after = descendants(container).filter((element) => element.dataset.field);
+		expect(after.length, "the form stays on screen").toBeGreaterThan(0);
+		for (const input of after) {
+			expect(input.value, `${input.dataset.field} must be cleared after saving`).toBe("");
+		}
+	});
+
+	it("keeps what you typed when the save fails, so nothing has to be retyped", () => {
+		const { ctx, push } = createMockViewContext("jira-review");
+		const document = createFakeDocument();
+		const container = settingsContainer(document);
+		jiraClient.mount?.(container as unknown as HTMLElement, ctx);
+		push({ kind: "state", state: { configured: true, config: CONFIG } });
+
+		push({ kind: "result", ok: false, action: "save_config", error: "Jira API token is required" });
+
+		const fields = descendants(container).filter((element) => element.dataset.field);
+		expect(fields.find((element) => element.dataset.field === "siteUrl")?.value).toBe(CONFIG.siteUrl);
+		const text = descendants(container)
+			.map((element) => element.textContent)
+			.join(" ");
+		expect(text).toContain("Jira API token is required");
+	});
+
+	it("does not clear the form for someone else's state broadcast", () => {
+		const { ctx, push } = createMockViewContext("jira-review");
+		const document = createFakeDocument();
+		const container = settingsContainer(document);
+		jiraClient.mount?.(container as unknown as HTMLElement, ctx);
+		push({ kind: "state", state: { configured: true, config: CONFIG } });
+		// A refresh, an attach, or another browser saving would all look like this.
+		push({ kind: "state", state: { configured: true, config: CONFIG, tickets: [] } });
+
+		const siteUrl = descendants(container).find((element) => element.dataset.field === "siteUrl");
+		expect(siteUrl?.value).toBe(CONFIG.siteUrl);
+	});
+
 	it("keeps the settings surface on the form even once configured", () => {
 		const { ctx, push } = createMockViewContext("jira-review");
 		const document = createFakeDocument();
