@@ -17,6 +17,9 @@ draft comment and then adds the `dogits-dans-le-nez` Jira label.
 
 ## Setup
 
+Credentials live in **Settings → Jira Review** (site URL, email, API token, board, ready JQL); the top-bar tab is the
+review workflow only. The token is sent once on save and kept in the host secret store — it is never broadcast back.
+
 Install it with `pi-web-ui install Jensen95/pi-web-ui-plugins/plugins/jira-review --build`, which builds this source-only
 plugin on the host. For local development:
 

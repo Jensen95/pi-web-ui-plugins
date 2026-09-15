@@ -37,6 +37,16 @@ import { repoPath } from "../helpers/repo-files";
  */
 const SETTINGS_PAGE_PLUGINS = ["catalog-sync", "mcp-manager", "ui-shortcuts"];
 
+/**
+ * Plugins that legitimately own two surfaces: a tab for the work, a settings
+ * page for the credentials behind it.
+ *
+ * This is only safe because the host gives the plugin a way to tell them apart -
+ * the settings container sits inside `.plugin-page`, the tab container does not
+ * (the ctx is byte-identical on both paths). One screen per surface, never both.
+ */
+const SPLIT_SURFACE_PLUGINS = ["jira-review"];
+
 const ID_RE = /^[A-Za-z0-9_-]+$/;
 const UI_KINDS = new Set(["view", "action", "badge", "menu", "page", "organizer", "divider"]);
 const UI_SLOTS = new Set([
@@ -157,15 +167,29 @@ describe("ui contributions", () => {
 		}
 	});
 
-	it("lists each plugin in exactly one place", () => {
+	it("lists each plugin in exactly one place, unless it splits surfaces on purpose", () => {
 		for (const plugin of plugins) {
 			const manifest = manifestOf(plugin.dirName) as RawManifest & { view?: unknown };
 			const slots = Object.keys(manifest.ui ?? {}).filter((slot) => slot !== "arrange" && slot !== "items");
 			const hasTab = manifest.view !== false;
+			const allowed = SPLIT_SURFACE_PLUGINS.includes(plugin.dirName) ? 2 : 1;
 			expect(
 				slots.length + (hasTab ? 1 : 0),
 				`plugins/${plugin.dirName} appears in ${slots.join(", ")}${hasTab ? " and the top-bar tabs" : ""}`,
-			).toBeLessThanOrEqual(1);
+			).toBeLessThanOrEqual(allowed);
+		}
+	});
+
+	it("gives a split-surface plugin exactly one settings page beside its tab", () => {
+		for (const dirName of SPLIT_SURFACE_PLUGINS) {
+			const manifest = manifestOf(dirName) as RawManifest & { view?: unknown };
+			const pages = manifest.ui?.["settings.pages"];
+			expect(Array.isArray(pages), `plugins/${dirName} declares no settings page`).toBe(true);
+			// The host cannot tell the plugin WHICH page was opened, so a second one
+			// would be indistinguishable from the first.
+			expect((pages as UiItem[]).length).toBe(1);
+			expect((pages as UiItem[])[0]?.kind).toBe("page");
+			expect(manifest.view, `plugins/${dirName} keeps its tab`).not.toBe(false);
 		}
 	});
 });

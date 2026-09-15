@@ -158,6 +158,22 @@ const VIEW_STYLE = `
 type Page = "dashboard" | "settings";
 type SettingsField = HTMLInputElement | HTMLTextAreaElement;
 
+/**
+ * Which host surface this mount is: the settings page, or the top-bar tab.
+ *
+ * The host calls `mount(container, ctx)` identically on both paths - the ctx is
+ * `{pluginId, send, onData}` either way - so the DOM is the only signal. A
+ * settings page is rendered into `div.plugin-page-host` inside `div.plugin-page`
+ * (PluginPage); a tab is rendered into `div.plugin-view`.
+ *
+ * If upstream ever renames those classes this returns false and the plugin falls
+ * back to the dashboard, which is the safe half: credentials are never shown on
+ * a surface that did not ask for them.
+ */
+export function isSettingsSurface(container: HTMLElement): boolean {
+	return typeof container.closest === "function" && container.closest(".plugin-page") !== null;
+}
+
 function appendSettingsField(
 	document: Document,
 	form: HTMLFormElement,
@@ -181,7 +197,7 @@ export default {
 	mount(container: HTMLElement, ctx: ViewContext): () => void {
 		const document = container.ownerDocument;
 		let state: ReviewState = {};
-		let page: Page = "settings";
+		const page: Page = isSettingsSurface(container) ? "settings" : "dashboard";
 		let selectedFolders: string[] = [];
 		let ticketFolderInputs = new Map<string, HTMLInputElement>();
 		const bridge =
@@ -231,16 +247,6 @@ export default {
 			save.type = "submit";
 			save.dataset.action = "save-settings";
 			actions.append(save);
-			if (state.configured) {
-				const back = makeElement(document, "button", "Back to reviews") as HTMLButtonElement;
-				back.type = "button";
-				back.dataset.action = "dashboard";
-				back.addEventListener("click", () => {
-					page = "dashboard";
-					render();
-				});
-				actions.append(back);
-			}
 			form.append(actions);
 			form.addEventListener("submit", (event) => {
 				event.preventDefault();
@@ -255,7 +261,6 @@ export default {
 					},
 					token: value("apiToken"),
 				});
-				page = "dashboard";
 				render();
 			});
 
@@ -292,13 +297,6 @@ export default {
 			refresh.type = "button";
 			refresh.dataset.action = "refresh";
 			refresh.addEventListener("click", () => ctx.send({ action: "refresh" }));
-			const settings = makeElement(document, "button", "Settings") as HTMLButtonElement;
-			settings.type = "button";
-			settings.dataset.action = "settings";
-			settings.addEventListener("click", () => {
-				page = "settings";
-				render();
-			});
 			const start = makeElement(document, "button", "Start reviews") as HTMLButtonElement;
 			start.type = "button";
 			start.dataset.action = "start-reviews";
@@ -310,7 +308,7 @@ export default {
 				}
 				startTicketReviews(bridge, state.tickets ?? [], selectedFolders, overrides);
 			});
-			toolbar.append(sprint, refresh, settings, start);
+			toolbar.append(sprint, refresh, start);
 
 			const foldersPanel = makeElement(document, "section");
 			foldersPanel.dataset.ui = "folders";
@@ -386,18 +384,41 @@ export default {
 			return root;
 		};
 
+		/** Shown in the tab before any credentials exist: the form lives in Settings
+		 *  now, and this plugin cannot navigate the user there itself. */
+		const renderUnconfigured = (): HTMLElement => {
+			const root = makeElement(document, "section");
+			root.className = "jira-review";
+			root.dataset.ui = "jira-unconfigured";
+			const heading = makeElement(document, "h1", "Jira Review");
+			const hint = makeElement(
+				document,
+				"p",
+				"No Jira credentials saved yet. Open Settings and choose Jira Review to add your site URL, email, " +
+					"API token and board.",
+			);
+			root.append(style(), heading, hint);
+			if (state.error) {
+				const error = makeElement(document, "p", state.error);
+				error.className = "jira-review__error";
+				root.append(error);
+			}
+			return root;
+		};
+
 		const render = (): void => {
-			container.replaceChildren(!state.configured || page === "settings" ? renderSettings() : renderDashboard());
+			if (page === "settings") {
+				container.replaceChildren(renderSettings());
+				return;
+			}
+			container.replaceChildren(state.configured ? renderDashboard() : renderUnconfigured());
 		};
 
 		const off = ctx.onData((payload) => {
 			if (!payload || typeof payload !== "object") return;
 			const message = payload as { kind?: unknown; state?: ReviewState; error?: unknown };
 			if (message.kind === "state") {
-				const wasConfigured = state.configured === true;
 				state = message.state ?? {};
-				if (!state.configured) page = "settings";
-				else if (!wasConfigured) page = "dashboard";
 				render();
 			} else if (message.kind === "result" && typeof message.error === "string") {
 				state = { ...state, error: message.error };

@@ -318,10 +318,18 @@ describe("Jira review client", () => {
 		).not.toThrow();
 	});
 
-	it("starts with a server-backed settings page and sends credentials only on save", () => {
+	/** A container the host would hand a settings page: it sits inside .plugin-page
+	 *  (see PluginPage in the host bundle). A tab's container has no such ancestor. */
+	const settingsContainer = (document: FakeDocument): FakeElement => {
+		const container = document.createElement("div");
+		container.ancestorClasses = ["plugin-page", "set-plugin-page"];
+		return container;
+	};
+
+	it("renders the credentials form only on the settings surface, and saves from there", () => {
 		const { ctx, sent } = createMockViewContext("jira-review");
 		const document = createFakeDocument();
-		const container = document.createElement("div");
+		const container = settingsContainer(document);
 		jiraClient.mount?.(container as unknown as HTMLElement, ctx);
 
 		expect(descendants(container).some((element) => element.dataset.ui === "jira-settings")).toBe(true);
@@ -345,7 +353,7 @@ describe("Jira review client", () => {
 		expect(sent).toContainEqual({ action: "save_config", config: CONFIG, token: TOKEN });
 	});
 
-	it("separates the review dashboard from settings and uses responsive grids", () => {
+	it("shows the dashboard on the tab surface and uses responsive grids", () => {
 		const { ctx, push } = createMockViewContext("jira-review");
 		const document = createFakeDocument();
 		const container = document.createElement("div");
@@ -363,15 +371,41 @@ describe("Jira review client", () => {
 		});
 
 		expect(descendants(container).some((element) => element.dataset.ui === "jira-dashboard")).toBe(true);
-		expect(descendants(container).some((element) => element.dataset.action === "settings")).toBe(true);
+		// Credentials live in the settings page now: the tab neither shows the form
+		// nor a button that would navigate to one it cannot reach.
+		expect(descendants(container).some((element) => element.dataset.ui === "jira-settings")).toBe(false);
+		expect(descendants(container).some((element) => element.dataset.action === "settings")).toBe(false);
 		const style = descendants(container).find((element) => element.tagName === "style")?.textContent ?? "";
 		expect(style).toContain(".jira-review__tickets { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));");
 		expect(style).toContain(".jira-review__settings { display: grid;");
+	});
 
-		descendants(container)
-			.find((element) => element.dataset.action === "settings")!
-			.click();
+	it("points an unconfigured tab at the settings page instead of duplicating the form", () => {
+		const { ctx, push } = createMockViewContext("jira-review");
+		const document = createFakeDocument();
+		const container = document.createElement("div");
+		jiraClient.mount?.(container as unknown as HTMLElement, ctx);
+		push({ kind: "state", state: { configured: false } });
+
+		const text = descendants(container)
+			.map((element) => element.textContent)
+			.join(" ");
+		expect(text).toMatch(/Settings/);
+		expect(text).toMatch(/Jira Review/);
+		expect(descendants(container).some((element) => element.dataset.ui === "jira-settings")).toBe(false);
+	});
+
+	it("keeps the settings surface on the form even once configured", () => {
+		const { ctx, push } = createMockViewContext("jira-review");
+		const document = createFakeDocument();
+		const container = settingsContainer(document);
+		jiraClient.mount?.(container as unknown as HTMLElement, ctx);
+		push({ kind: "state", state: { configured: true, config: CONFIG, folders: [], tickets: [], reviews: {} } });
+
 		expect(descendants(container).some((element) => element.dataset.ui === "jira-settings")).toBe(true);
+		expect(descendants(container).some((element) => element.dataset.ui === "jira-dashboard")).toBe(false);
+		// "Back to reviews" had nowhere to go from inside the settings modal.
+		expect(descendants(container).some((element) => element.dataset.action === "dashboard")).toBe(false);
 	});
 
 	it("mounts a view that sends state requests and exposes explicit review/post controls", () => {
@@ -452,6 +486,9 @@ interface FakeElement {
 	dataset: Record<string, string>;
 	children: FakeElement[];
 	ownerDocument: FakeDocument;
+	/** Ancestor class names, so closest() can answer which host surface this is. */
+	ancestorClasses: string[];
+	closest(selector: string): FakeElement | null;
 	addEventListener(type: string, listener: (event?: any) => void): void;
 	append(...children: FakeElement[]): void;
 	replaceChildren(...children: FakeElement[]): void;
@@ -479,6 +516,10 @@ function createFakeDocument(): FakeDocument {
 			dataset: {},
 			children: [],
 			ownerDocument: document,
+			ancestorClasses: [],
+			closest(selector) {
+				return element.ancestorClasses.includes(selector.replace(".", "")) ? element : null;
+			},
 			addEventListener(type, listener) {
 				let handlers = listeners.get(type);
 				if (!handlers) listeners.set(type, (handlers = new Set()));
