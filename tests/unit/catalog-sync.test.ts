@@ -116,14 +116,28 @@ function syncButton(container: FakeElement): FakeElement {
 async function mountView(host?: unknown): Promise<{
 	container: FakeElement;
 	dispatched: unknown[];
+	sent: unknown[];
+	push: (payload: unknown) => void;
 	cleanup: () => void;
 }> {
 	const module = (await importClientArtifact(PLUGIN_ID)) as {
 		default: { mount(container: unknown, ctx: unknown): () => void };
 	};
 	const { container, dispatched } = createDom(host);
-	const cleanup = module.default.mount(container, { pluginId: PLUGIN_ID, send: () => {}, onData: () => () => {} });
-	return { container, dispatched, cleanup };
+	const sent: unknown[] = [];
+	const listeners = new Set<(payload: unknown) => void>();
+	const cleanup = module.default.mount(container, {
+		pluginId: PLUGIN_ID,
+		send: (payload: unknown) => sent.push(payload),
+		onData: (cb: (payload: unknown) => void) => {
+			listeners.add(cb);
+			return () => listeners.delete(cb);
+		},
+	});
+	const push = (payload: unknown): void => {
+		for (const listener of [...listeners]) listener(payload);
+	};
+	return { container, dispatched, sent, push, cleanup };
 }
 
 /** A host whose reloadCatalog resolves with the given receipt. */
@@ -140,7 +154,7 @@ describe("catalog-sync client", () => {
 		expect(result.ok, `stderr: ${result.stderr}`).toBe(true);
 		const plugin = loadPlugin(PLUGIN_ID);
 		expect(plugin.hasClientArtifact).toBe(true);
-		expect(plugin.hasServerSource, "the view needs no server half").toBe(false);
+		expect(plugin.hasServerSource, "update detection needs filesystem access").toBe(true);
 		expect(isClientEntry(await importClientArtifact(PLUGIN_ID))).toBe(true);
 	});
 
@@ -244,6 +258,76 @@ describe("catalog-sync client", () => {
 
 		expect(container.children, "cleanup must empty the container").toEqual([]);
 		expect(button.listenerCount(), "cleanup must remove the click listener").toBe(0);
+	});
+});
+
+describe("update list", () => {
+	const rows = [
+		{
+			id: "webmail",
+			name: "Webmail",
+			version: "0.2.0",
+			status: "update-available",
+			command: "pi-web-ui install Jensen95/pi-web-ui-plugins/plugins/webmail --name webmail --build --force",
+		},
+		{ id: "mermaid", name: "Mermaid", version: "1.0.0", status: "current" },
+		{ id: "legacy", name: "Legacy", status: "unknown" },
+	];
+
+	it("asks the server for update status on mount", async () => {
+		const host = hostReturning({ ok: true, entries: [] });
+		const { sent, cleanup } = await mountView(host);
+		expect(sent).toContainEqual({ action: "check_updates" });
+		cleanup();
+	});
+
+	it("shows each plugin with its state, and the command for the stale ones", async () => {
+		const host = hostReturning({ ok: true, entries: [] });
+		const { container, push, cleanup } = await mountView(host);
+		push({ kind: "updates", rows });
+
+		const text = visibleText(container);
+		expect(text).toContain("Webmail");
+		expect(text).toContain("Mermaid");
+		expect(text, "the stale plugin's update command must be copyable").toContain("--build --force");
+		// A plugin that is already current needs no command cluttering the row.
+		expect(text.split("--build --force").length - 1).toBe(1);
+		cleanup();
+	});
+
+	it("distinguishes 'nothing to do' from 'could not tell'", async () => {
+		const host = hostReturning({ ok: true, entries: [] });
+		const { container, push, cleanup } = await mountView(host);
+		push({ kind: "updates", rows });
+
+		const text = visibleText(container).toLowerCase();
+		expect(text).toMatch(/update available/);
+		expect(text).toMatch(/up to date/);
+		expect(text, "an unreadable remote must not look reassuring").toMatch(/unknown/);
+		cleanup();
+	});
+
+	it("never claims it can update a plugin by itself", async () => {
+		// reloadCatalog({install:true}) is the only install path a plugin can reach
+		// and it never passes --build, which would replace these source-only plugins
+		// with unbuilt source. So no button may promise an update.
+		const host = hostReturning({ ok: true, entries: [] });
+		const { container, push, cleanup } = await mountView(host);
+		push({ kind: "updates", rows });
+
+		const buttons = flatten(container).filter((element) => element.tagName === "button");
+		for (const button of buttons) {
+			expect(button.textContent.toLowerCase()).not.toMatch(/^update\b/);
+		}
+		cleanup();
+	});
+
+	it("reports a plugin set it could not read rather than rendering nothing", async () => {
+		const host = hostReturning({ ok: true, entries: [] });
+		const { container, push, cleanup } = await mountView(host);
+		push({ kind: "updates", rows: [] });
+		expect(visibleText(container).toLowerCase()).toMatch(/no plugins/);
+		cleanup();
 	});
 });
 

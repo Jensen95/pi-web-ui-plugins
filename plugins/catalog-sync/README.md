@@ -24,6 +24,37 @@ with **Build from source** ticked, or from a terminal:
 pi-web-ui install Jensen95/pi-web-ui-plugins/plugins/<id> --build
 ```
 
+## Update status
+
+The page lists every installed plugin with one of three states:
+
+| State            | Meaning                                                                             |
+| ---------------- | ----------------------------------------------------------------------------------- |
+| Update available | the source repository's HEAD moved since this plugin was installed                  |
+| Up to date       | the installed sha matches the remote                                                |
+| Unknown          | no `.pi-git-sha` marker, a local-directory install, or the remote could not be read |
+
+The comparison is the host's own: `pi-web-ui install` writes `.pi-source.json` and `.pi-git-sha`
+(`git ls-remote <remote> HEAD`, first 12 chars) into each plugin directory, and the CLI's
+`checkPluginUpdates()` compares them. That check is never surfaced in the UI, so this plugin runs it and
+shows the result. One `git ls-remote` per distinct remote — all twelve plugins here share one repository.
+
+Because the sha is the repository HEAD rather than a per-plugin path sha, any commit to this repo marks
+every plugin from it as updatable. That is the host's definition of outdated; inventing a second one would
+disagree with `pi-web-ui check-updates`.
+
+**It does not update anything, and that is deliberate.** The only install path a plugin can reach is
+`host.reloadCatalog(source, { install: true })`, which never passes `--build`: `buildPluginJobArgs` adds
+that flag only when the job spec sets `build: true`, and the catalog-sync path never does. On a
+source-only repository it would replace working plugins with unbuilt source. So each stale row shows the
+command instead:
+
+```sh
+pi-web-ui install Jensen95/pi-web-ui-plugins/plugins/<id> --name <id> --build --force
+```
+
+Settings -> UI plugins -> Plugin marketplace with **Build from source** ticked does the same thing.
+
 ## What this plugin used to do
 
 Before 0.86 it cloned this repository into a temporary directory, ran `npm ci` and the repository build, and installed
