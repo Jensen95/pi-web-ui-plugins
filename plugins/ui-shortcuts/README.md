@@ -2,6 +2,8 @@
 
 Adds global keyboard shortcuts for the pi-web-ui views:
 
+It also registers itself in the top bar's overflow menu (`⋯`), next to the other occasional-use plugin views.
+
 | Shortcut                   | View                     |
 | -------------------------- | ------------------------ |
 | `Ctrl+Alt+T` / `Cmd+Alt+T` | Terminal                 |

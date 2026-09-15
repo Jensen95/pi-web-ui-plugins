@@ -42,8 +42,9 @@ const EXPECTED_IDS = Object.keys(EXPECTED_ARTIFACTS).sort();
 
 /** Families the host gates in server/plugins.ts, via its can("<family>") calls.
  *  A missing or misspelled one of these is denied at runtime, silently but for a
- *  single console.error line. */
-const ENFORCED_FAMILIES = ["fs", "http", "tools"];
+ *  single console.error line. "ui" and "chat" were added in 0.86 (issue #146);
+ *  without "ui" a manifest's whole `ui` block is dropped in strict mode. */
+const ENFORCED_FAMILIES = ["chat", "fs", "http", "tools", "ui"];
 
 /** Families upstream manifests declare that the host does not gate. They are
  *  surfaced verbatim in Settings (SettingsModal.tsx renders permissions.join(", ")),

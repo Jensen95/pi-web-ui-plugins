@@ -8,6 +8,8 @@ no server launching in here. pi-mcp-adapter keeps doing the hard parts; this
 plugin reads the same config files it reads and writes the one file it is
 allowed to write.
 
+It also registers itself in the top bar's overflow menu (`⋯`). That entry needs the `ui` permission: pi-web-ui drops a plugin's whole `ui` block when it declares permissions without a `ui` family.
+
 ## What it does
 
 - **Lists the effective servers** across the whole precedence chain, each with

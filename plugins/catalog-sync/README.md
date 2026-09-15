@@ -2,6 +2,8 @@
 
 Writes this repository's plugin list into the pi-web-ui marketplace, from:
 
+It also registers itself in the top bar's overflow menu (`⋯`), since syncing is an occasional action rather than a view you sit in.
+
 ```text
 https://raw.githubusercontent.com/Jensen95/pi-web-ui-plugins/main/plugins/catalog.json
 ```

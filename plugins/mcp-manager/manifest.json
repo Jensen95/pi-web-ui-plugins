@@ -4,7 +4,17 @@
 	"version": "0.1.0",
 	"icon": "🔌",
 	"description": "Manage the MCP servers pi-mcp-adapter reads: every config layer with provenance, enable/disable toggles, and project-local add/remove. Writes only .pi/mcp.json; run /reload in pi to apply.",
-	"permissions": ["fs"],
+	"permissions": ["fs", "ui"],
+	"ui": {
+		"topbar.overflow": [
+			{
+				"id": "open",
+				"label": "MCP Servers",
+				"icon": "🔌",
+				"kind": "view"
+			}
+		]
+	},
 	"build": {
 		"install": "npm install --ignore-scripts --no-audit --no-fund esbuild@0.28.2",
 		"command": "npx --no-install esbuild src/index.ts --bundle --platform=node --format=esm --target=es2022 --packages=external --outfile=index.mjs && npx --no-install esbuild src/client.ts --bundle --platform=browser --format=esm --target=es2022 --loader:.css=text --external:./vendor/* --outfile=client/entry.mjs",
