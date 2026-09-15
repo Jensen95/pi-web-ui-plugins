@@ -4,14 +4,14 @@
 	"version": "0.1.0",
 	"icon": "🔄",
 	"description": "Write this repository's plugin list into the pi-web-ui marketplace. Requires pi-web-ui 0.86 or newer.",
-	"view": true,
+	"view": false,
 	"ui": {
-		"topbar.overflow": [
+		"settings.pages": [
 			{
-				"id": "open",
-				"label": "Plugin Catalog Sync",
+				"id": "catalog",
+				"label": "Plugin catalog",
 				"icon": "🔄",
-				"kind": "view"
+				"kind": "page"
 			}
 		]
 	},

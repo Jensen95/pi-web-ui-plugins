@@ -11,7 +11,7 @@ These are English-only TypeScript ports of the upstream plugins. See
 
 | id                  | icon | What it does                                                                                                                 | Permissions                               |
 | ------------------- | ---- | ---------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
-| `catalog-sync`      | 🔄   | Writes this repository's plugin list into the marketplace with one button (`host.reloadCatalog`).                            | none                                      |
+| `catalog-sync`      | 🔄   | Settings page (no tab) that writes this repository's plugin list into the marketplace (`host.reloadCatalog`).                | none                                      |
 | `jira-review`       | 🎟️   | Reviews active Jira Cloud sprint tickets, saves agent-readiness scores, and manually posts approved notes.                   | `fs`, `net`, `tools`                      |
 | `webmail`           | 📬   | IMAP inbox, SMTP sending and new-mail notifications, with an optional switch that lets the agent manage the mailbox.         | `net:imap/smtp`, `tools`                  |
 | `db-client`         | 🗄️   | Schema browsing, SQL queries and row editing across MySQL, PostgreSQL, SQLite, SQL Server, MongoDB and Redis.                | `net`, `tools`                            |

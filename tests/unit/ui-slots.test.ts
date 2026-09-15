@@ -27,7 +27,11 @@ import { repoPath } from "../helpers/repo-files";
 
 /** Plugins that belong in the top-bar overflow menu rather than only in a tab:
  *  occasional-use utilities, not things you sit inside while working. */
-const OVERFLOW_PLUGINS = ["catalog-sync", "mcp-manager", "ui-shortcuts"];
+const OVERFLOW_PLUGINS = ["mcp-manager", "ui-shortcuts"];
+
+/** Plugins that are a settings page and nothing else: too small to deserve a
+ *  view of their own. catalog-sync is one button. */
+const SETTINGS_PAGE_PLUGINS = ["catalog-sync"];
 
 const ID_RE = /^[A-Za-z0-9_-]+$/;
 const UI_KINDS = new Set(["view", "action", "badge", "menu", "page", "organizer", "divider"]);
@@ -164,6 +168,36 @@ describe("top-bar overflow entries", () => {
 		for (const plugin of plugins) {
 			if (OVERFLOW_PLUGINS.includes(plugin.dirName)) continue;
 			expect(manifestOf(plugin.dirName).ui?.["topbar.overflow"]).toBeUndefined();
+		}
+	});
+});
+
+describe("settings-page-only plugins", () => {
+	it("declares one settings page instead of a view", () => {
+		for (const dirName of SETTINGS_PAGE_PLUGINS) {
+			const manifest = manifestOf(dirName) as RawManifest & { view?: unknown };
+			const pages = manifest.ui?.["settings.pages"];
+			expect(Array.isArray(pages), `plugins/${dirName} declares no settings.pages entry`).toBe(true);
+			expect((pages as UiItem[]).length).toBe(1);
+			expect((pages as UiItem[])[0]?.kind).toBe("page");
+		}
+	});
+
+	it("opts out of the top bar entirely: no tab, no overflow entry", () => {
+		for (const dirName of SETTINGS_PAGE_PLUGINS) {
+			const manifest = manifestOf(dirName) as RawManifest & { view?: unknown };
+			// The host renders a tab for every plugin whose manifest view is not false,
+			// and skips preloading its bundle when it is - the page mounts on demand.
+			expect(manifest.view, `plugins/${dirName} still claims a view`).toBe(false);
+			expect(manifest.ui?.["topbar.overflow"]).toBeUndefined();
+			expect(manifest.ui?.["topbar.primary"]).toBeUndefined();
+		}
+	});
+
+	it("still ships a mountable client entry, which is what the page renders", () => {
+		for (const dirName of SETTINGS_PAGE_PLUGINS) {
+			const plugin = plugins.find((p) => p.dirName === dirName);
+			expect(plugin?.hasClientSource, `plugins/${dirName} has no client to mount`).toBe(true);
 		}
 	});
 });

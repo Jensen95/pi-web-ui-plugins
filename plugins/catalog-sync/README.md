@@ -2,7 +2,7 @@
 
 Writes this repository's plugin list into the pi-web-ui marketplace, from:
 
-It also registers itself in the top bar's overflow menu (`⋯`), since syncing is an occasional action rather than a view you sit in.
+It has no top-bar tab (`"view": false`). It lives entirely in **Settings → Plugin catalog**, because one button does not deserve a view of its own.
 
 ```text
 https://raw.githubusercontent.com/Jensen95/pi-web-ui-plugins/main/plugins/catalog.json
@@ -12,7 +12,7 @@ Requires pi-web-ui 0.86 or newer (host API 4+, which added `host.reloadCatalog`)
 
 ## Use
 
-One button: **Sync catalog**. It calls `host.reloadCatalog(<catalog URL>, { replace: true })`. The server fetches the
+Open **Settings → Plugin catalog**. One button: **Sync catalog**. It calls `host.reloadCatalog(<catalog URL>, { replace: true })`. The server fetches the
 document, validates every entry with the same rules the marketplace "Add plugin" form uses, writes
 `<dataDir>/plugin-catalog.json` atomically, reloads plugins, and returns a receipt the view shows you. A failed fetch or
 a malformed document writes nothing, so the previous catalog stays valid.
