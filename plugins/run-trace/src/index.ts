@@ -59,6 +59,9 @@ interface UiMessage {
 	toolCallId?: string;
 	toolName?: string;
 	isError?: boolean;
+	/** Assistant messages record which agent model produced them. */
+	model?: string;
+	provider?: string;
 }
 
 /** The streaming message is tagged while it is being built, so it renders as running. */
@@ -256,6 +259,8 @@ export default {
 					// that "thinking -> answer -> tool call" lines up serially on the
 					// timeline instead of stacking at zero width on the same point.
 					const blocks = m.content ?? [];
+					// Which agent model produced this message, for the segment's source line.
+					const modelTag = str(m.model) ? ` · ${str(m.model)}` : "";
 					const ests: number[] = [];
 					let totalEst = 0;
 					for (const b of blocks) {
@@ -303,7 +308,7 @@ export default {
 									...(live ? {} : { dur: Math.max(0, end - start) }),
 									title: "Thinking",
 									summary: cut(thinking.trim(), SUMMARY_CAP),
-									source: "Model · thinking",
+									source: `Model · thinking${modelTag}`,
 									status: live ? "running" : "done",
 									turn,
 									meta: { chars: thinking.length },
@@ -325,7 +330,7 @@ export default {
 									...(live ? {} : { dur: Math.max(0, end - start) }),
 									title: "Answer",
 									summary: cut(text.trim(), SUMMARY_CAP),
-									source: "Model · answer",
+									source: `Model · answer${modelTag}`,
 									status: live ? "running" : "done",
 									turn,
 									meta: { chars: text.length },
