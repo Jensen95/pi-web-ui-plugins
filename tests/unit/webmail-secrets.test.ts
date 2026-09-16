@@ -313,14 +313,16 @@ describe("webmail falls back to plaintext rather than losing a password", () => 
 		expect(warnings[0]).not.toContain("another");
 	});
 
-	it("still works on a host with no secret facility at all", async () => {
+	it("still works on a host with no secret facility at all, and does not warn", async () => {
 		const dir = tempDir();
 		const { host } = await start({ dir, secretsOverride: undefined });
 		await saveConfig(host, fullConfig(IMAP_PASS, SMTP_PASS));
 
 		expect(readConfig(dir)!.imap!.pass).toBe(IMAP_PASS);
 		expect(lastState(host).config.imap.hasPass).toBe(true);
-		expect(warningNotifications(host)).toHaveLength(1);
+		// A host that offers no secret store at all is the documented plaintext
+		// fallback, not a degraded store: warning about it is noise the user cannot act on.
+		expect(warningNotifications(host)).toHaveLength(0);
 	});
 
 	it("does not strip a legacy password it failed to migrate", async () => {
