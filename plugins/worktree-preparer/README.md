@@ -1,37 +1,56 @@
 # Worktree Preparer (`worktree-preparer`)
 
-Creates a disposable aggregate project folder from selected folders in the current workspace.
+Assembles a few folders from the current workspace into **one fresh folder**, so a session can treat exactly those
+projects as the files it works on.
 
-- A selected Git repository is fetched from `origin/master` and receives one new branch/worktree.
-- A selected non-Git folder is copied recursively.
-- Source repositories are never reset or checked out, so existing uncommitted work stays in place.
-- Copied folders exclude `.git`, `node_modules`, `dist`, `build`, and `coverage`.
+- A selected **Git repository** gets one new branch checked out as a `git worktree` inside the aggregate. The source
+  repository is never reset or checked out, so uncommitted work stays where it is.
+- A selected **plain folder** is copied, excluding `.git`, `node_modules`, `dist`, `build`, and `coverage`.
 - One branch name is used for every repository in the run.
 
-The result includes the absolute aggregate-folder path, and a successful run offers **Open session here**, which calls
-`host.openSession({ folders: [root], newChat: true })` (pi-web-ui 0.86+, the #146 API). The host asks you to confirm
-access to the folder first — its grant check is exact-string membership, so it prompts even for a folder inside the
-current workspace. Nothing opens without that click.
+## Using it
 
-Only the aggregate root is passed, deliberately. Its entries live inside it, and the host dedupes workspace roots by
-exact string with no nesting check, so passing them as extra roots would render the same subtree twice while granting
-no access the cwd does not already imply. `set_workspace_roots` also replaces the persisted roots for a cwd, so extra
-roots are not free.
+1. **Pick the folders.** Each row says what will happen to it, once the background Git probe has finished.
+2. **Name the branch and the folder.** The resolved absolute path is shown live under the field.
+3. **Press Prepare** and read the per-folder report.
+4. **Press Open session here** to work in the result.
 
-A partial run does not offer the button: a failed repository still leaves a usable `root` with a non-empty `errors`
-array, and opening that folder would look like success while repositories are missing from it. On a host without
-`openSession`, the button says so instead of failing silently.
+## Where the aggregate lands
+
+By default under `~/pi-workspaces/<name>` — **outside** the current workspace, deliberately. An aggregate nested inside
+a source project would put the session's working directory back inside that project, where `../..` walks straight out of
+the scope you asked for.
+
+The field also accepts `~/somewhere/name` or an absolute path, used as written. Refused: an empty name, any `..`
+segment, a NUL byte, an absolute path less than two segments deep (`/`, `/tmp`), a path inside or containing a selected
+folder, and an aggregate directory that already exists (it is never reused or merged into).
+
+## Default-branch detection
+
+The base branch is resolved per repository: `refs/remotes/origin/HEAD` first, then `git ls-remote --symref origin HEAD`,
+and only then the `master` fallback. The worktree is created off `origin/<default>` after fetching it, so `main`,
+`master`, and `trunk` repositories all work in the same run without asking.
+
+## What "Open session here" actually scopes
+
+It calls `host.openSession({ folders: [root], newChat: true })` (pi-web-ui 0.86+). Only the aggregate root is passed, so
+the host makes it the session's working directory and clears the other workspace roots — the file tree then shows the
+aggregate and nothing else. The host asks you to confirm access to the folder first; nothing opens without that click.
+
+**It does not sandbox the agent.** Workspace roots govern the file tree, not what a tool call may read: an agent with
+shell or file access can still reach anything on disk the user can. This scopes attention, not permissions. The view
+says so in place.
+
+A partial run does not offer the button — a failed repository still leaves a usable `root`, and opening it would look
+like success while a project is missing from it. On a host without `openSession`, the button says so instead of failing
+silently.
 
 ## Setup
 
-Install it with `pi-web-ui install Jensen95/pi-web-ui-plugins/plugins/worktree-preparer --build`, which builds this source-only
-plugin on the host. For local development:
+Install with `pi-web-ui install Jensen95/pi-web-ui-plugins/plugins/worktree-preparer --build`, which builds this
+source-only plugin on the host. For local development:
 
 ```sh
 npm run build:worktree-preparer
 pi-web-ui install plugins/worktree-preparer
 ```
-
-Open the plugin in the current workspace, select folders, enter an output path inside that workspace and a branch name,
-then click **Prepare**. Git repositories must have an `origin/master` remote branch. If one repository fails, successful
-entries and the aggregate path remain visible so the result can be inspected manually.

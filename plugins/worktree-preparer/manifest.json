@@ -3,7 +3,7 @@
 	"name": "Worktree Preparer",
 	"version": "0.1.0",
 	"icon": "🌿",
-	"description": "Assemble selected workspace folders and Git repositories into a fresh multi-project worktree folder.",
+	"description": "Assemble selected workspace folders into one fresh folder outside the workspace - Git repositories as new worktree branches, other folders copied - and open a session scoped to it.",
 	"permissions": ["fs", "terminal"],
 	"build": {
 		"install": "npm install --ignore-scripts --no-audit --no-fund esbuild@0.28.2",
