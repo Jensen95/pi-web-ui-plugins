@@ -230,6 +230,21 @@ export interface SshHostConfig {
 	password?: string;
 	privateKey?: string;
 	passphrase?: string;
+	/** Path to a private key file; takes precedence over an inline PEM. Not a secret. */
+	privateKeyPath?: string;
+	/** ssh-agent socket, "$SSH_AUTH_SOCK" expanded at connect time. Not a secret. */
+	agent?: string;
+}
+
+/** One importable host parsed out of `~/.ssh/config`. */
+export interface SshConfigCandidate {
+	alias: string;
+	host: string;
+	port: number;
+	username: string;
+	privateKeyPath: string;
+	/** Set by readSshConfigCandidates: a host with this address or name is already saved. */
+	imported?: boolean;
 }
 
 /** The `<pluginDir>/ssh-hosts.json` document. Unknown keys are preserved. */
@@ -247,6 +262,10 @@ export interface PublicSshHost {
 	username: string;
 	hasPass: boolean;
 	hasKey: boolean;
+	hasPassphrase: boolean;
+	/** Path and agent are not secrets, so they echo back as their real values. */
+	privateKeyPath: string;
+	agent: string;
 }
 
 /** A live connection as the browser may see it. */

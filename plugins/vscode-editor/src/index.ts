@@ -1,15 +1,16 @@
 /**
- * vscode-editor details —— details VSCode details
+ * vscode-editor server entry - the filesystem backend of the VSCode-like editor plugin.
  *
- * detailsESM details { activate(host) → deactivate? }details
- * details plugin_messagedetails{ action, reqId, ... }details host.sendTo
- * details socketdetails reqId details
+ * Contract: ESM default export { activate(host) → deactivate? }.
+ * The client sends plugin_message: { action, reqId, ... }; this plugin replies with
+ * host.sendTo straight back to the requesting socket (reqId matches concurrent
+ * requests), never by broadcast.
  *
- * details
- * - details host.cwddetails
- *   resolve details root details
- * - details node_modules/.git details
- * - details 2MB limitdetails tmp + rename details
+ * Security:
+ * - every path must be relative to host.cwd (the workspace the server started in)
+ *   and must still resolve inside root; anything escaping is rejected;
+ * - directory walks skip noise dirs like node_modules/.git and symlinks (loop guard);
+ * - reads are capped at 2MB; writes land atomically via tmp + rename.
  */
 
 // @ts-nocheck
@@ -19,7 +20,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
 
-/** details */
+/** Noise entry names skipped when listing directories */
 const IGNORED = new Set([
 	"node_modules",
 	".git",
@@ -38,29 +39,99 @@ const IGNORED = new Set([
 	"Thumbs.db",
 ]);
 
-const MAX_LIST_ENTRIES = 8000; // flatlist details
-const MAX_DEPTH = 12; // flatlist details
-const MAX_READ_BYTES = 2 * 1024 * 1024; // details SFTP details
+const MAX_LIST_ENTRIES = 8000; // flatlist total entry cap
+const MAX_DEPTH = 12; // flatlist max depth
+const MAX_READ_BYTES = 2 * 1024 * 1024; // per-file read cap (shared by local and remote SFTP)
 const MAX_SSH_HOSTS = 32;
 const CONN_TIMEOUT_MS = 15000;
-const MAX_EXEC_OUTPUT = 256 * 1024; // details exec detailstruncateddetails
-const MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024; // detailsbase64 details WSdetails
-const MAX_UPLOAD_BYTES = 100 * 1024 * 1024; // detailsbase64 details WSdetails
-const UPLOAD_STALE_MS = 30 * 60 * 1000; // details
+const MAX_EXEC_OUTPUT = 256 * 1024; // remote exec output truncation cap
+const MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024; // download-to-browser size cap (base64 over WS)
+const MAX_UPLOAD_BYTES = 100 * 1024 * 1024; // upload size cap (base64 chunks over WS)
+const UPLOAD_STALE_MS = 30 * 60 * 1000; // stale upload session timeout (swept after a client drops mid-transfer)
 
 function toWire(p) {
 	return p.split(path.sep).join("/");
 }
 
+/**
+ * Parse `~/.ssh/config` into importable candidates
+ * `[{ alias, host, port, username, privateKeyPath }]`.
+ *
+ * OpenSSH semantics: within a block the first occurrence of a key wins; a pure
+ * wildcard `Host *` block only supplies defaults (a global IdentityFile becomes
+ * each host's default key path) and yields no candidate of its own; an alias
+ * containing a wildcard yields nothing. Only the first IdentityFile is taken and
+ * `~` is left as written - resolveKeyFile expands it at connect time.
+ *
+ * Pure function, exported on its own so it can be unit tested.
+ */
+export function parseSshConfig(text) {
+	const blocks = []; // { patterns, hostname, user, port, identityfile }
+	let cur = null;
+	for (const raw of String(text ?? "").split(/\r?\n/)) {
+		const line = raw.trim();
+		if (!line || line.startsWith("#")) continue;
+		const sp = line.search(/[\s=]/);
+		if (sp < 0) continue;
+		const key = line.slice(0, sp).trim().toLowerCase();
+		let val = line.slice(sp).trim().replace(/^=\s*/, "").trim();
+		const quoted =
+			val.length >= 2 && ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'")));
+		if (quoted) val = val.slice(1, -1);
+		if (key === "host") {
+			cur = {
+				patterns: val.split(/\s+/).filter(Boolean),
+				hostname: null,
+				user: null,
+				port: null,
+				identityfile: null,
+			};
+			blocks.push(cur);
+		} else if (cur) {
+			if (key === "hostname" && cur.hostname === null && val) cur.hostname = val;
+			else if (key === "user" && cur.user === null && val) cur.user = val;
+			else if (key === "port" && cur.port === null && val) cur.port = val;
+			else if (key === "identityfile" && cur.identityfile === null && val) {
+				cur.identityfile = quoted ? val : val.split(/\s+/)[0];
+			}
+		}
+	}
+	// Global defaults: blocks whose patterns are exactly ["*"]. Several such blocks
+	// inherit in order and an already-set value is never overwritten.
+	const defaults = { user: null, port: null, identityfile: null };
+	for (const b of blocks) {
+		if (b.patterns.length === 1 && b.patterns[0] === "*") {
+			if (defaults.user === null) defaults.user = b.user;
+			if (defaults.port === null) defaults.port = b.port;
+			if (defaults.identityfile === null) defaults.identityfile = b.identityfile;
+		}
+	}
+	const out = [];
+	for (const b of blocks) {
+		if (b.patterns.length === 1 && b.patterns[0] === "*") continue; // defaults-only block
+		for (const alias of b.patterns) {
+			if (!alias || alias === "*" || /[*?!]/.test(alias)) continue;
+			out.push({
+				alias,
+				host: b.hostname ?? alias,
+				port: Number(b.port ?? defaults.port) || 22,
+				username: b.user ?? defaults.user ?? "root",
+				privateKeyPath: b.identityfile ?? defaults.identityfile ?? "",
+			});
+		}
+	}
+	return out;
+}
+
 export default {
 	activate(host) {
-		// details set_cwd detailshost.onCwdChange details activate details
+		// Mutable: follows the main app's set_cwd live (host.onCwdChange, see end of activate)
 		let root = path.resolve(host.cwd);
 
-		/** details → details null */
+		/** Relative path → validated absolute path; null when illegal */
 		function safeResolve(rel) {
 			if (typeof rel !== "string") return null;
-			const abs = path.resolve(root, rel); // "" = details
+			const abs = path.resolve(root, rel); // "" = the workspace root itself, legal
 			if (abs !== root && !abs.startsWith(root + path.sep)) return null;
 			return abs;
 		}
@@ -69,7 +140,7 @@ export default {
 			return { res: true, reqId, ok: false, error };
 		}
 
-		/** detailstree details */
+		/** Single-level directory listing (used by the tree, expanded lazily) */
 		async function listDir(relDir) {
 			const abs = safeResolve(relDir ?? "");
 			if (!abs) throw new Error("path escapes workspace");
@@ -77,9 +148,9 @@ export default {
 			const entries = [];
 			for (const d of dirents) {
 				if (IGNORED.has(d.name)) continue;
-				// details/junction details
+				// Symlinks/junctions are never followed (loop and escape guard)
 				if (d.isSymbolicLink()) continue;
-				// details.vsc-upload-*.partdetails
+				// In-flight upload temp files (.vsc-upload-*.part) stay out of the tree
 				if (d.name.startsWith(".vsc-upload-")) continue;
 				entries.push({
 					name: d.name,
@@ -90,7 +161,7 @@ export default {
 			return entries;
 		}
 
-		/** detailsCtrl+P detailsBFS details/details */
+		/** Flat whole-repo file list (for Ctrl+P quick open), BFS with depth/count caps */
 		async function flatList() {
 			const files = [];
 			let truncated = false;
@@ -103,7 +174,7 @@ export default {
 				try {
 					dirents = await fs.readdir(dir, { withFileTypes: true });
 				} catch {
-					continue; // details
+					continue; // skip dirs we cannot read (permissions etc.)
 				}
 				for (const d of dirents) {
 					if (files.length >= MAX_LIST_ENTRIES) {
@@ -120,7 +191,7 @@ export default {
 			return { files, truncated };
 		}
 
-		/** details NUL details <2% details */
+		/** Content sniff: no NUL and <2% control characters counts as text */
 		function looksLikeText(buf) {
 			const n = Math.min(buf.length, 8000);
 			let ctrl = 0;
@@ -132,7 +203,7 @@ export default {
 			return n === 0 || ctrl / n < 0.02;
 		}
 
-		/** details UTF-8 → GBK → latin1details decodeText details */
+		/** Decode: strict UTF-8 → GBK → latin1 (same semantics as the main app's decodeText) */
 		function decodeBuf(buf) {
 			try {
 				return new TextDecoder("utf-8", { fatal: true }).decode(buf);
@@ -158,7 +229,7 @@ export default {
 			const abs = safeResolve(rel);
 			if (!abs || abs === root) throw new Error("invalid path");
 			await fs.mkdir(path.dirname(abs), { recursive: true });
-			// detailstmp + renamedetails
+			// Atomic write: tmp + rename, so no half-written content is ever visible
 			const tmp = abs + ".vsc-tmp-" + process.pid;
 			await fs.writeFile(tmp, String(text ?? ""), "utf-8");
 			await fs.rename(tmp, abs);
@@ -171,7 +242,7 @@ export default {
 				if (kind === "dir") await fs.mkdir(abs);
 				else {
 					await fs.mkdir(path.dirname(abs), { recursive: true });
-					await fs.writeFile(abs, "", { flag: "wx" }); // details
+					await fs.writeFile(abs, "", { flag: "wx" }); // throws when it already exists
 				}
 			} catch (err) {
 				if (err.code === "EEXIST") throw new Error("an entry with this name already exists");
@@ -191,7 +262,7 @@ export default {
 			}
 			const abs = safeResolve(rel);
 			if (!abs || abs === root) throw new Error("invalid path");
-			await fs.access(abs); // details
+			await fs.access(abs); // throw straight away when the source does not exist
 			await fs.rename(abs, path.join(path.dirname(abs), newName));
 		}
 
@@ -202,19 +273,21 @@ export default {
 		}
 
 		// ------------------------------------------------------------------
-		// SFTP details
+		// SFTP sync: transfer between the local workspace and a remote directory.
 		//
-		// details <root>/.vscode/sftp.jsondetailsvscode-sftp details
-		// detailsCtrl+S details
-		// sync-configs.json details ssh2 details
-		// npm detailsup details→detailsdown details→detailsfile
-		// details / tree details / all detailsvscode-sftp details globdetails
+		// The config lives in the workspace at <root>/.vscode/sftp.json (vscode-sftp
+		// compatible field names, so the file can be edited directly and takes effect
+		// on Ctrl+S; on first use it is migrated once from the old plugin-dir
+		// sync-configs.json). The ssh2 dependency is not bundled - it is npm-installed
+		// into the plugin dir on first use. Direction: up = local→remote, down =
+		// remote→local. Scope: file = single file / tree = subtree / all = whole repo.
+		// Exclude rules are vscode-sftp style globs.
 		// ------------------------------------------------------------------
 		const sftpCfgDir = () => path.join(root, ".vscode");
-		const sftpCfgFile = () => path.join(sftpCfgDir(), "sftp.json"); // vscode-sftp details
-		const LEGACY_SYNC_STORE = path.join(host.dir, "sync-configs.json"); // details
+		const sftpCfgFile = () => path.join(sftpCfgDir(), "sftp.json"); // path vscode-sftp expects (follows the current workspace)
+		const LEGACY_SYNC_STORE = path.join(host.dir, "sync-configs.json"); // old store (migration source)
 		const syncConns = new Map(); // workspaceRoot → {client,sftp}
-		let syncConnFp = ""; // details
+		let syncConnFp = ""; // config fingerprint of the live connection (edits to the file force a reconnect)
 		const syncDeps = { mod: null, ok: false, failed: false, installing: false, waiters: [] };
 
 		function posixJoin(base, rel) {
@@ -222,9 +295,10 @@ export default {
 			return `${String(base).replace(/\/+$/, "")}/${String(rel).replace(/^\/+/g, "")}`;
 		}
 
-		/** details vscode-sftp detailsname/host/remotePath/privateKeyPath/
-		 *  passphrase/ignore/agent details watcher.autoUploaddetailsvscode-sftp details
-		 *  privateKeyPath details ~/.ssh/id_rsadetails ~ details resolveKeyFiledetails */
+		/** One internal shape; accepts vscode-sftp field names (name/host/remotePath/
+		 *  privateKeyPath/passphrase/ignore/agent plus the legacy watcher.autoUpload).
+		 *  vscode-sftp's privateKeyPath is usually written as ~/.ssh/id_rsa, so `~` is
+		 *  expanded when the key is read (see resolveKeyFile). */
 		function normalizeCfg(c) {
 			c = c && typeof c === "object" ? c : {};
 			const watcher = c.watcher && typeof c.watcher === "object" ? c.watcher : {};
@@ -237,10 +311,10 @@ export default {
 				passphrase: String(c.passphrase ?? ""),
 				privateKey: String(c.privateKey ?? ""),
 				privateKeyPath: String(c.privateKeyPath ?? ""),
-				// vscode-sftp details uploadOnSave details watcher.autoUploaddetails
+				// vscode-sftp honours both top-level uploadOnSave and legacy watcher.autoUpload
 				uploadOnSave: Boolean(c.uploadOnSave ?? watcher.autoUpload),
-				// ssh-agent socketdetailsvscode-sftp details "$SSH_AUTH_SOCK"details
-				// details getSyncSftpdetails
+				// ssh-agent socket (vscode-sftp writes "$SSH_AUTH_SOCK"); kept verbatim in the
+				// config and only expanded at connect time (see getSyncSftp)
 				agent: String(c.agent ?? ""),
 				protocol: String(c.protocol ?? "sftp").toLowerCase(),
 				remoteRoot: String(c.remotePath ?? c.remoteRoot ?? "").trim() || "/",
@@ -250,8 +324,8 @@ export default {
 			};
 		}
 
-		/** details ~ detailsvscode-sftp details ~/.ssh/id_rsadetails
-		 *  details */
+		/** Resolve a private key path: `~` is expanded (vscode-sftp writes ~/.ssh/id_rsa),
+		 *  absolute paths are used as-is, anything else falls back to the workspace. */
 		function resolveKeyFile(p) {
 			if (!p) return p;
 			if (p === "~") return os.homedir();
@@ -260,8 +334,8 @@ export default {
 			return path.resolve(root, p);
 		}
 
-		/** details——details .vscode/sftp.json details
-		 *  details */
+		/** Read the small file every time - saving .vscode/sftp.json takes effect with no
+		 *  reload; when it is missing, migrate once from the old plugin-dir store. */
 		async function readSyncCfg() {
 			try {
 				return normalizeCfg(JSON.parse(await fs.readFile(sftpCfgFile(), "utf8")));
@@ -271,13 +345,13 @@ export default {
 				const old = normalizeCfg(legacy?.[root]);
 				if (old.host) {
 					await saveSyncCfg(old);
-					return old; // details
+					return old; // migration succeeded
 				}
 			} catch {}
 			return {};
 		}
 
-		/** details vscode-sftp details JSONdetails tmp+renamedetails */
+		/** Write vscode-sftp style JSON (atomic tmp+rename); the user can open and edit it */
 		async function saveSyncCfg(cfg) {
 			await fs.mkdir(sftpCfgDir(), { recursive: true });
 			const file = {
@@ -294,14 +368,15 @@ export default {
 			if (cfg.name) file.name = cfg.name;
 			if (cfg.privateKeyPath) file.privateKeyPath = cfg.privateKeyPath;
 			if (cfg.privateKey) file.privateKey = cfg.privateKey;
-			// details $SSH_AUTH_SOCK details
+			// Keep the value as written (including the $SSH_AUTH_SOCK placeholder) so the config ports across machines
 			if (cfg.agent) file.agent = cfg.agent;
 			const tmp = `${sftpCfgFile()}.tmp-${process.pid}`;
 			await fs.writeFile(tmp, JSON.stringify(file, null, 4) + "\n", "utf8");
 			await fs.rename(tmp, sftpCfgFile());
 		}
 
-		/** details stdout Bufferdetails sshExec details UTF8 details */
+		/** Run a remote command and collect raw stdout as a Buffer (for archive download;
+		 *  unlike sshExec it does no UTF8 decoding) */
 		function sshExecBuffer(c, cmd) {
 			return new Promise((resolve, reject) => {
 				c.client.exec(cmd, (err, stream) => {
@@ -324,10 +399,10 @@ export default {
 			});
 		}
 
-		/** POSIX shell details */
+		/** POSIX shell single-quote escaping */
 		const shQuote = (s) => `'${String(s ?? "").replace(/'/g, "'\\''")}'`;
 
-		/** details .. details */
+		/** Remote path check: must be absolute and contain no .. segment */
 		function safeRemotePath(p) {
 			p = String(p ?? "");
 			if (!p.startsWith("/") || p.split("/").includes("..")) throw new Error("invalid path");
@@ -353,7 +428,7 @@ export default {
 			};
 		}
 
-		/** details ssh2details npm details ssh details */
+		/** Lazily load ssh2; npm-install it on demand when missing (same pattern as the ssh plugin). */
 		function ensureSshMod(force = false) {
 			if (syncDeps.ok) return Promise.resolve(syncDeps.mod);
 			if (syncDeps.failed && !force) return Promise.resolve(null);
@@ -396,7 +471,7 @@ export default {
 									: "📝 Editor sync dependency installation failed; run npm install ssh2 in the plugin directory",
 							);
 							for (const w of syncDeps.waiters.splice(0)) w(syncDeps.ok ? syncDeps.mod : null);
-							broadcastSshState(); // details → details ⚠ssh2 details
+							broadcastSshState(); // dependency state changed → refresh the ⚠ssh2 button in the client host bar (hoisted declaration, safe)
 							res(syncDeps.ok ? syncDeps.mod : null);
 						}
 					}
@@ -420,7 +495,7 @@ export default {
 			const mod = await ensureSshMod();
 			if (!mod?.Client) throw new Error("ssh2 dependency is not ready");
 			if (!cfg?.host) throw new Error("sync is not configured; configure it or edit .vscode/sftp.json first");
-			// details .vscode/sftp.jsondetails→ details
+			// Fingerprint changed (user edited .vscode/sftp.json) → drop the old connection and reconnect
 			const fp = JSON.stringify([
 				cfg.host,
 				cfg.port,
@@ -458,7 +533,7 @@ export default {
 				};
 				if (cfg.password) opts.password = cfg.password;
 				else if (cfg.agent) {
-					// ssh-agent socketdetailsvscode-sftp details "$SSH_AUTH_SOCK" details
+					// ssh-agent socket (vscode-sftp uses the "$SSH_AUTH_SOCK" placeholder)
 					opts.agent = cfg.agent.replace(/\$SSH_AUTH_SOCK\b/g, () => process.env.SSH_AUTH_SOCK || "");
 				} else {
 					opts.privateKey = privateKey;
@@ -488,8 +563,8 @@ export default {
 			return opened.sftp;
 		}
 
-		/** glob → RegExpdetails ** details * details ? detailsvscode-sftp details
-		 *  details**details*.mapdetails a.map details a/b/c.map */
+		/** glob → RegExp (supports **, * and ?; vscode-sftp style).
+		 *  Example: the rule "**" + slash + "*.map" matches both a.map and a/b/c.map */
 		function globToRegExp(pattern) {
 			let re = "";
 			for (let i = 0; i < pattern.length; i++) {
@@ -498,11 +573,11 @@ export default {
 					if (pattern[i + 1] === "*") {
 						i++;
 						if (i >= pattern.length - 1)
-							re += ".*"; // details **detailsa/** details
+							re += ".*"; // trailing **: matches everything left across levels (a/** matches nested files)
 						else if (pattern[i + 1] === "/") {
 							i++;
 							re += "(?:[^/]*/)*";
-						} // "**/" details
+						} // "**/" matches zero or more directory levels
 						else re += ".*";
 					} else re += "[^/]*";
 				} else if (c === "?") re += "[^/]";
@@ -512,21 +587,22 @@ export default {
 			return new RegExp(`^${re}$`);
 		}
 
-		/** details ignore details + details + details */
+		/** Compile the ignore rule set: whole-path match + slash-free patterns apply at any
+		 *  level + a directory rule covers everything under it */
 		function makeIgnoreMatcher(patterns) {
 			const rules = (patterns ?? [])
 				.map(String)
 				.filter(Boolean)
 				.map((raw) => {
 					const pat = raw.replace(/^\/+|\/+$/g, "");
-					if (pat === "**") return [/.*/]; // details
+					if (pat === "**") return [/.*/]; // ignore everything
 					const list = [globToRegExp(pat)];
 					if (!pat.includes("/")) {
-						list.push(globToRegExp(`**/${pat}`)); // "dist"details"*.log" details
-						list.push(globToRegExp(`${pat}/**`)); // details
-						list.push(globToRegExp(`**/${pat}/**`)); // details
+						list.push(globToRegExp(`**/${pat}`)); // "dist", "*.log" match a segment at any level
+						list.push(globToRegExp(`${pat}/**`)); // a bare dir name covers everything under it at top level
+						list.push(globToRegExp(`**/${pat}/**`)); // and the contents of same-named dirs at any level
 					}
-					if (pat.endsWith("/**")) list.push(globToRegExp(pat.slice(0, -3))); // a/** details a details
+					if (pat.endsWith("/**")) list.push(globToRegExp(pat.slice(0, -3))); // a/** ignores a itself too
 					return list;
 				});
 			return (rel) => rules.some((list) => list.some((re) => re.test(rel)));
@@ -536,7 +612,7 @@ export default {
 			return rel === ".vscode" || rel.startsWith(".vscode/") || makeIgnoreMatcher(cfg.exclude)(rel);
 		}
 
-		/** details rel details */
+		/** Collect the relative file list to transfer (shared by both directions: rel paths only) */
 		async function collectLocal(relBase, cfg) {
 			const out = [];
 			async function walk(absDir, relDir) {
@@ -565,7 +641,7 @@ export default {
 					list = await sftpCall(sftp, "readdir", rdir);
 				} catch {
 					return;
-				} // details
+				} // a missing directory counts as empty
 				for (const f of list) {
 					const rel = relDir ? `${relDir}/${f.filename}` : f.filename;
 					if (isSyncExcluded(rel, cfg)) continue;
@@ -582,17 +658,17 @@ export default {
 			let cur = rpath.startsWith("/") ? "" : ".";
 			for (const s of segs) {
 				cur = cur === "." ? s : `${cur}/${s}`;
-				await sftpCall(sftp, "mkdir", cur).catch(() => {}); // details
+				await sftpCall(sftp, "mkdir", cur).catch(() => {}); // already-exists is fine
 			}
 		}
 
-		/** detailsprogress(onDone, name) details */
+		/** Run one sync task and return a summary; progress(onDone, name) reports progress. */
 		async function runSyncTransfer(cfg, direction, scope, targetRel, onProgress) {
 			const sftp = await getSyncSftp(cfg);
 			let rels;
 			if (scope === "file") {
 				rels = [targetRel];
-				if (isSyncExcluded(targetRel, cfg)) throw new Error(`details${targetRel}detailsis excluded by the sync rules`);
+				if (isSyncExcluded(targetRel, cfg)) throw new Error(`${targetRel} is excluded by the sync rules`);
 			} else {
 				const baseRel = scope === "tree" ? String(targetRel || "") : "";
 				rels =
@@ -623,21 +699,24 @@ export default {
 		}
 
 		// ------------------------------------------------------------------
-		// SSH detailsRemote-SSH details
+		// SSH remote hosts (Remote-SSH mode)
 		//
-		// details CRUDdetails<pluginDir>/ssh-hosts.jsondetails
-		// details ssh details+ detailskeepalive details+
-		// PTY shelldetailsbase64 details+ execdetails
-		// details action——details list/read/write/create/rename/
-		// delete details connId details SFTPdetails
-		// ssh2 details ensureSshModdetails
-		// detailsshell_data / shell_exit / conn_closed details socketdetails
-		// kind:"state" details/details
+		// Host CRUD (<pluginDir>/ssh-hosts.json, local-only, redacted on echo; on first
+		// run the list is migrated from the old standalone ssh plugin's file of the same
+		// name) + a connection pool (kept alive with keepalive) + PTY shell (base64
+		// streaming) + exec.
+		// Remote file operations get no separate actions - the client passes connId on
+		// list/read/write/create/rename/delete and the request routes to that
+		// connection's SFTP, sharing one client-side code path with local files.
+		// The ssh2 dependency reuses ensureSshMod above (auto-installed when missing).
+		// Events: shell_data / shell_exit / conn_closed go only to the creating socket;
+		// kind:"state" broadcasts host/connection list changes (credentials redacted).
 		// ------------------------------------------------------------------
 		const SSH_STORE = path.join(host.dir, "ssh-hosts.json");
 		const LEGACY_SSH_STORE = path.join(host.dir, "..", "ssh", "ssh-hosts.json");
-		// details/details/passphrase details id details host.secrets
-		//detailsAES-256-GCMdetailsssh-hosts.json details
+		// Secret storage: host password/private key/passphrase go to the host's
+		// host.secrets (AES-256-GCM) keyed by host id; ssh-hosts.json no longer stores
+		// plaintext credentials. Hosts without that facility fall back to the old behaviour.
 		const sec = host.secrets;
 		const SECRET_FIELDS = [
 			["password", "pass"],
@@ -651,7 +730,7 @@ export default {
 		}
 
 		let sshCfgs = null;
-		const sshConns = new Map(); // connId → details
+		const sshConns = new Map(); // connId → connection record
 		let nextSshConn = 1;
 
 		async function ensureSshCfgs() {
@@ -663,14 +742,14 @@ export default {
 			}
 			if (!Array.isArray(sshCfgs.hosts)) {
 				try {
-					// details ssh details
+					// Migrate the host list from the old standalone ssh plugin (same format, copied as-is)
 					const legacy = JSON.parse(await fs.readFile(LEGACY_SSH_STORE, "utf8"));
 					if (Array.isArray(legacy.hosts) && legacy.hosts.length) sshCfgs.hosts = legacy.hosts;
 				} catch {}
 			}
 			if (!Array.isArray(sshCfgs.hosts)) sshCfgs.hosts = [];
 			if (sec?.set) {
-				// details → details + details
+				// One-time migration: legacy plaintext credentials → encrypted secrets + stripped from the file
 				let migrated = false;
 				for (const h of sshCfgs.hosts) {
 					if (!h.id) continue;
@@ -695,7 +774,7 @@ export default {
 				}
 			}
 			if (sec?.get) {
-				// details publicSshHost details
+				// Refill the in-memory copy (connecting needs real credentials; redaction happens in publicSshHost)
 				for (const h of sshCfgs.hosts) {
 					if (!h.id) continue;
 					for (const [field] of SECRET_FIELDS) {
@@ -714,14 +793,14 @@ export default {
 			const hosts = sec
 				? (sshCfgs?.hosts ?? []).map((h) => {
 						const clean = { ...h };
-						for (const [field] of SECRET_FIELDS) delete clean[field]; // details
+						for (const [field] of SECRET_FIELDS) delete clean[field]; // credentials only ever live in the secret store
 						return clean;
 					})
 				: (sshCfgs?.hosts ?? []);
 			await fs.writeFile(SSH_STORE, JSON.stringify({ ...sshCfgs, hosts }, null, "\t"), "utf8");
 		}
 
-		/** details/details → details null → details */
+		/** Save/clear one credential field of one host (truthy value → write; explicit null → delete). */
 		function storeHostSecret(hostId, field, value) {
 			const name = hostSecretName(hostId, field);
 			if (!sec || !name || !hostId) return;
@@ -731,7 +810,8 @@ export default {
 			} catch {}
 		}
 
-		/** details/details */
+		/** Redacted echo: passwords, keys and passphrases report presence only.
+		 *  A key path and an agent socket are not secrets, so they echo verbatim. */
 		function publicSshHost(h) {
 			return {
 				id: h.id,
@@ -740,7 +820,10 @@ export default {
 				port: h.port ?? 22,
 				username: h.username ?? "root",
 				hasPass: Boolean(h.password),
-				hasKey: Boolean(h.privateKey),
+				hasKey: Boolean(h.privateKey || h.privateKeyPath),
+				hasPassphrase: Boolean(h.passphrase),
+				privateKeyPath: h.privateKeyPath ?? "",
+				agent: h.agent ?? "",
 			};
 		}
 
@@ -784,10 +867,33 @@ export default {
 			broadcastSshState();
 		}
 
+		/** Read ~/.ssh/config and mark the candidates that are already saved. */
+		async function readSshConfigCandidates() {
+			const file = path.join(os.homedir(), ".ssh", "config");
+			let text;
+			try {
+				text = await fs.readFile(file, "utf8");
+			} catch {
+				throw new Error("~/.ssh/config not found");
+			}
+			const list = parseSshConfig(text);
+			if (!list.length) throw new Error("~/.ssh/config contains no importable host");
+			await ensureSshCfgs();
+			const exists = new Set();
+			for (const h of sshCfgs.hosts) {
+				if (h.host) exists.add(`${h.host}:${h.port ?? 22}:${h.username ?? "root"}`);
+				if (h.name) exists.add(`name:${h.name}`);
+			}
+			return list.map((c) => ({
+				...c,
+				imported: exists.has(`${c.host}:${c.port}:${c.username}`) || exists.has(`name:${c.alias}`),
+			}));
+		}
+
 		async function connectSshHost(cfg, clientId, reqId) {
 			try {
 				const mod = await ensureSshMod();
-				if (!mod?.Client) throw new Error("ssh2 dependency is not readydetails");
+				if (!mod?.Client) throw new Error("ssh2 dependency is not ready; try again shortly");
 				const connId = `c${nextSshConn++}`;
 				const c = {
 					connId,
@@ -810,8 +916,32 @@ export default {
 					keepaliveInterval: 10000,
 					keepaliveCountMax: 3,
 				};
-				if (cfg.password) opts.password = cfg.password;
-				else if (cfg.privateKey) opts.privateKey = cfg.privateKey;
+				if (cfg.agent) {
+					// ssh-agent socket, same placeholder rule as the SFTP sync side.
+					opts.agent = String(cfg.agent).replace(/\$SSH_AUTH_SOCK\b/g, () => process.env.SSH_AUTH_SOCK || "");
+				} else {
+					if (cfg.password) opts.password = cfg.password;
+					// privateKeyPath wins over an inline PEM (same rule as the sync side);
+					// the path supports ~ expansion through resolveKeyFile.
+					const keyPath = cfg.privateKeyPath ? resolveKeyFile(String(cfg.privateKeyPath).trim()) : null;
+					let key = null;
+					if (keyPath) {
+						try {
+							key = await fs.readFile(keyPath, "utf8");
+						} catch {
+							throw new Error(`failed to read private key file: ${cfg.privateKeyPath}`);
+						}
+					} else if (cfg.privateKey) key = cfg.privateKey;
+					if (key) opts.privateKey = key;
+					if (cfg.passphrase) opts.passphrase = cfg.passphrase;
+					if (!opts.password && !opts.privateKey && !opts.agent) {
+						// Not enough to authenticate: drop the entry instead of leaving a
+						// half-open connection behind (same handling as a failed first connect).
+						sshConns.delete(connId);
+						broadcastSshState();
+						throw new Error("provide a password, private key, key path or agent in the host editor");
+					}
+				}
 				c.client
 					.on("ready", () => {
 						c.status = "connected";
@@ -821,7 +951,7 @@ export default {
 					.on("error", (err) => {
 						const m = err?.level ? `[${err.level}] ${err.message}` : (err?.message ?? String(err));
 						if (c.status === "connecting") {
-							// details
+							// A failed first connect leaves no half-open connection behind
 							sshConns.delete(connId);
 							broadcastSshState();
 							host.sendTo(clientId, { res: true, reqId, ok: false, action: "connect", error: m });
@@ -848,7 +978,7 @@ export default {
 			});
 		}
 
-		// ---- details SFTPdetails catchdetails -----------------
+		// ---- Remote file operations (over the connection's SFTP; errors bubble to the router catch) ----
 		async function remoteList(c, dirPath) {
 			const list = await sftpCall(await getSftp(c), "readdir", dirPath || "/");
 			const entries = list.map((f) => ({
@@ -901,9 +1031,9 @@ export default {
 			else await sftpCall(sftp, "unlink", p);
 		}
 
-		// ---- PTY shell details exec ---------------------------------------------------
+		// ---- PTY shell and exec ---------------------------------------------------
 		function sshOpenShell(c, msg, reqId, clientId) {
-			c.ownerId = clientId; // details/details
+			c.ownerId = clientId; // after a reconnect or in a second tab the newest requester takes over this connection's terminal stream
 			c.client.shell({ cols: msg.cols ?? 80, rows: msg.rows ?? 24, term: "xterm-256color" }, (err, stream) => {
 				if (err)
 					return void host.sendTo(clientId, { res: true, reqId, ok: false, action: "shell_open", error: err.message });
@@ -941,16 +1071,19 @@ export default {
 		}
 
 		// ------------------------------------------------------------------
-		// details / details SFTP details
+		// Upload: the local workspace and remote SFTP share one chunk protocol.
 		//
-		// detailsupload_begindetails + details exists details→ details upload
-		//detailsbase64 details→ details
-		// details rename details writeFile details
-		// details sftp.writeFiledetails
-		// details clientId:uploadId details/details upload_abort
-		// details
+		// Protocol: upload_begin (validate the target + report exists so the client can
+		// confirm an overwrite) → upload chunk by chunk (base64, order checked) → the last
+		// chunk finishes the file. Local chunks append to a temp file in the target dir and
+		// the last chunk renames it into place (same semantics as writeFile, no half-written
+		// content); remote chunks buffer in memory and the last chunk does a single
+		// sftp.writeFile (same size cap as download).
+		// Sessions are isolated by clientId:uploadId; client errors and timeouts are cleaned
+		// up by upload_abort plus the periodic sweep. Files upload one at a time, ordered by
+		// the client.
 		// ------------------------------------------------------------------
-		const uploads = new Map(); // `${clientId}:${uploadId}` → details
+		const uploads = new Map(); // `${clientId}:${uploadId}` → upload session
 
 		function sweepUploads() {
 			const now = Date.now();
@@ -959,10 +1092,12 @@ export default {
 			}
 		}
 
-		/** details / details / details
-		 *  details PromisedetailsWindows details unlink details EBUSY/EPERMdetails
-		 *  details void close() details unlink details`.part` details
-		 *  detailsupload_abort details */
+		/** Abort and clean up one upload session (close the handle / drop the temp file /
+		 *  discard buffered chunks).
+		 *  Returns a Promise: on Windows unlinking before the handle is closed gives
+		 *  EBUSY/EPERM, and the old void close() + immediate swallowed unlink left `.part`
+		 *  files behind (the client re-checks the directory right after upload_abort, so the
+		 *  file must be gone before the response goes out). */
 		async function abortUploadEntry(u) {
 			if (!u) return;
 			uploads.delete(u.key);
@@ -981,8 +1116,9 @@ export default {
 			}
 		}
 
-		/** details/details/details
-		 *  details */
+		/** Start: validate target dir/file name/size and probe whether the target exists (so
+		 *  the client can confirm an overwrite); local opens the temp file handle up front
+		 *  (chunks append in order), remote only validates the path. */
 		async function beginUpload(clientId, msg) {
 			const name = String(msg.name ?? "");
 			if (!name || name.includes("/") || name.includes("\\") || name.includes("..")) {
@@ -1026,7 +1162,7 @@ export default {
 			} catch {}
 			await fs.mkdir(absDir, { recursive: true });
 			const tmp = path.join(absDir, `.vsc-upload-${uploadId}.part`);
-			const fh = await fs.open(tmp, "w"); // details
+			const fh = await fs.open(tmp, "w"); // handle stays open, chunks append in order
 			uploads.set(key, {
 				key,
 				uploadId,
@@ -1043,7 +1179,8 @@ export default {
 			return { uploadId, exists };
 		}
 
-		/** details {received}details/details {done, size} */
+		/** Take one chunk; non-final chunks return {received}, the final chunk finishes the
+		 *  transfer, ends the session and returns {done, size} */
 		async function chunkUpload(clientId, msg) {
 			const u = uploads.get(`${clientId}:${msg.uploadId}`);
 			if (!u) throw new Error("upload session does not exist or timed out; upload again");
@@ -1061,14 +1198,14 @@ export default {
 				u.next++;
 				return { received: u.next };
 			}
-			// details
+			// Final chunk: finish writing, session over
 			if (u.scope === "local") {
 				await u.fh.close().catch(() => {});
 				u.fh = null;
-				await fs.rename(u.tmp, u.finalAbs); // details
+				await fs.rename(u.tmp, u.finalAbs); // atomic replace (overwrites an existing file)
 			} else {
 				const sftp = await getSftp(getSshConn(u.connId));
-				await mkdirpRemote(sftp, u.rpath.split("/").slice(0, -1).join("/")); // details
+				await mkdirpRemote(sftp, u.rpath.split("/").slice(0, -1).join("/")); // create the target dir when missing (same semantics as local)
 				await sftpCall(sftp, "writeFile", u.rpath, Buffer.concat(u.bufs, u.bytes));
 			}
 			uploads.delete(u.key);
@@ -1080,7 +1217,7 @@ export default {
 			const { action, reqId } = msg;
 			try {
 				switch (action) {
-					case "list": // details connId = details
+					case "list": // single directory level (lazy tree expansion); with connId = remote directory
 						if (msg.connId) {
 							host.sendTo(clientId, {
 								res: true,
@@ -1105,7 +1242,7 @@ export default {
 						host.sendTo(clientId, { res: true, reqId, ok: true, action, ...(await flatList()) });
 						break;
 					case "download": {
-						// details connId details SFTPdetails tar.gz details
+						// Download to the user's machine: local reads directly; with connId it goes over remote SFTP, folders are packed as tar.gz
 						if (!msg.connId) {
 							const abs = safeResolve(String(msg.path ?? ""));
 							if (!abs || abs === root) throw new Error("invalid path");
@@ -1117,7 +1254,7 @@ export default {
 							host.sendTo(clientId, { res: true, reqId, ok: true, action, b64: buf.toString("base64"), size: st.size });
 							break;
 						}
-						// details
+						// Remote branch
 						const c = getSshConn(msg.connId);
 						const p = safeRemotePath(msg.path).replace(/\/+$/, "") || "/";
 						const sftp = await getSftp(c);
@@ -1128,7 +1265,7 @@ export default {
 							throw new Error("path does not exist");
 						}
 						if (st.isDirectory()) {
-							// detailstar.gzdetails
+							// Folder: pack it remotely (tar.gz) instead of transferring file by file
 							const clean = p.replace(/\/+$/, "");
 							const name = clean.split("/").pop();
 							const parent = clean.split("/").slice(0, -1).join("/") || "/";
@@ -1188,26 +1325,26 @@ export default {
 						host.sendTo(clientId, { res: true, reqId, ok: true, action });
 						break;
 					case "upload_begin": {
-						// details existsdetails+ details
+						// Start: report exists (for overwrite confirmation) + create the session
 						const st = await beginUpload(clientId, msg);
 						host.sendTo(clientId, { res: true, reqId, ok: true, action, ...st });
 						break;
 					}
 					case "upload": {
-						// detailsi === total-1details/details
+						// One chunk; the last one (i === total-1) finishes the transfer and ends the session
 						const st = await chunkUpload(clientId, msg);
 						host.sendTo(clientId, { res: true, reqId, ok: true, action, ...st });
 						break;
 					}
 					case "upload_abort": {
-						// details/details
+						// Abort the session (clean up the temp file when the client errors or the user cancels an overwrite)
 						const u = uploads.get(`${clientId}:${msg.uploadId}`);
 						if (u) await abortUploadEntry(u);
 						host.sendTo(clientId, { res: true, reqId, ok: true, action });
 						break;
 					}
 					case "sync_get": {
-						// details SFTP details list/read + connIddetails
+						// Note: not to be confused with remote SFTP operations (those go through list/read + connId)
 						const cfg = await readSyncCfg();
 						return void host.sendTo(clientId, {
 							res: true,
@@ -1215,7 +1352,7 @@ export default {
 							ok: true,
 							action,
 							config: publicSync(cfg),
-							configPath: ".vscode/sftp.json", // details
+							configPath: ".vscode/sftp.json", // the client's "edit config file" entry point
 						});
 					}
 					case "sync_save": {
@@ -1234,7 +1371,7 @@ export default {
 							port: Number(c.port) || 22,
 							username: c.username ?? old.username ?? "root",
 							name: c.name !== undefined ? String(c.name || "") : (old.name ?? ""),
-							// details = details null = details
+							// Blank credential = keep the old value; explicit null = clear it
 							password: c.password === null ? "" : c.password || old.password,
 							passphrase: c.passphrase === null ? "" : c.passphrase || old.passphrase,
 							privateKey: c.privateKey === null ? "" : c.privateKey || old.privateKey,
@@ -1246,7 +1383,7 @@ export default {
 							uploadOnSave: Boolean(c.uploadOnSave),
 						});
 						await saveSyncCfg(next);
-						dropSyncConn(root); // details
+						dropSyncConn(root); // config changed, the old connection is stale
 						return void host.sendTo(clientId, {
 							res: true,
 							reqId,
@@ -1257,7 +1394,7 @@ export default {
 						});
 					}
 					case "sync_ensure": {
-						// details/details
+						// "Edit config file": make sure it exists (write a template or migrate when needed), return the relative path
 						let cfg = await readSyncCfg();
 						if (!cfg.host) {
 							cfg = normalizeCfg({ host: "", remoteRoot: "/", ignore: [".git", "node_modules"] });
@@ -1276,7 +1413,7 @@ export default {
 						const cfg = await readSyncCfg();
 						if (!cfg?.host) throw new Error("sync is not configured; configure it or edit .vscode/sftp.json first");
 						const sftp = await getSyncSftp(cfg);
-						// details
+						// Probe that the remote root is reachable
 						await sftpCall(sftp, "readdir", cfg.remoteRoot || "/");
 						return void host.sendTo(clientId, { res: true, reqId, ok: true, action });
 					}
@@ -1303,9 +1440,9 @@ export default {
 						});
 					}
 					// ----------------------------------------------------------------
-					// SSH details
+					// SSH remote host management
 					// ----------------------------------------------------------------
-					case "state": // details / details / ssh2 details
+					case "state": // plugin state: host list / connection list / ssh2 dependency state (redacted)
 						await ensureSshCfgs();
 						host.sendTo(clientId, { res: true, reqId, ok: true, action, state: publicSshState() });
 						break;
@@ -1321,27 +1458,40 @@ export default {
 							const i = sshCfgs.hosts.findIndex((x) => x.id === h.id);
 							if (i < 0) throw new Error("host does not exist");
 							const old = sshCfgs.hosts[i];
-							// details = details null = details
-							// details publicSshHost details
+							// Credentials go to the secret store: blank = keep the old value,
+							// explicit null = clear (and delete the secret). The in-memory object
+							// keeps the real credential for connecting; publicSshHost redacts it.
 							storeHostSecret(h.id, "password", h.password === null ? null : h.password || undefined);
 							storeHostSecret(h.id, "privateKey", h.privateKey === null ? null : h.privateKey || undefined);
+							storeHostSecret(h.id, "passphrase", h.passphrase === null ? null : h.passphrase || undefined);
 							sshCfgs.hosts[i] = {
 								...old,
 								name: h.name ?? old.name,
 								host: String(h.host).trim() || old.host,
 								port: Number(h.port) || old.port,
 								username: h.username ?? old.username,
-								// details = details null = details
+								// Blank = keep the old value, explicit null = clear.
 								password: h.password === null ? undefined : h.password || old.password,
 								privateKey: h.privateKey === null ? undefined : h.privateKey || old.privateKey,
+								passphrase: h.passphrase === null ? undefined : h.passphrase || old.passphrase,
+								// Path and agent are not secrets: an absent field keeps the old
+								// value, an empty string clears it.
+								privateKeyPath:
+									h.privateKeyPath !== undefined
+										? String(h.privateKeyPath || "").trim() || undefined
+										: (old.privateKeyPath ?? undefined),
+								agent: h.agent !== undefined ? String(h.agent || "") || undefined : (old.agent ?? undefined),
 							};
 						} else {
-							if (!h.password && !h.privateKey)
-								throw new Error("provide a password or private key; empty credentials cannot authenticate");
-							if (sshCfgs.hosts.length >= MAX_SSH_HOSTS) throw new Error(`details ${MAX_SSH_HOSTS} details`);
+							if (!h.password && !h.privateKey && !h.privateKeyPath && !h.agent)
+								throw new Error(
+									"provide a password, private key, key path or agent; empty credentials cannot authenticate",
+								);
+							if (sshCfgs.hosts.length >= MAX_SSH_HOSTS) throw new Error(`at most ${MAX_SSH_HOSTS} hosts can be saved`);
 							const id = `h${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`;
 							storeHostSecret(id, "password", h.password || undefined);
 							storeHostSecret(id, "privateKey", h.privateKey || undefined);
+							storeHostSecret(id, "passphrase", h.passphrase || undefined);
 							sshCfgs.hosts.push({
 								id,
 								name: String(h.name || h.host),
@@ -1350,11 +1500,52 @@ export default {
 								username: String(h.username || "root"),
 								password: h.password ? String(h.password) : undefined,
 								privateKey: h.privateKey ? String(h.privateKey) : undefined,
+								passphrase: h.passphrase ? String(h.passphrase) : undefined,
+								privateKeyPath: h.privateKeyPath ? String(h.privateKeyPath).trim() : undefined,
+								agent: h.agent ? String(h.agent) : undefined,
 							});
 						}
 						await saveSshCfgs();
 						broadcastSshState();
 						host.sendTo(clientId, { res: true, reqId, ok: true, action });
+						break;
+					}
+					case "sshconfig_list": {
+						// Parse ~/.ssh/config; candidates already saved are flagged as imported.
+						const list = await readSshConfigCandidates();
+						host.sendTo(clientId, { res: true, reqId, ok: true, action, hosts: list });
+						break;
+					}
+					case "sshconfig_import": {
+						// Bulk import: only the key path is stored, never the key's contents.
+						await ensureSshCfgs();
+						const aliases = Array.isArray(msg.aliases) ? msg.aliases.map(String) : [];
+						if (!aliases.length) throw new Error("select at least one host to import");
+						const wanted = new Map((await readSshConfigCandidates()).map((c) => [c.alias, c]));
+						let added = 0;
+						let skipped = 0;
+						for (const alias of aliases) {
+							const c = wanted.get(alias);
+							if (!c || c.imported) {
+								skipped++;
+								continue;
+							}
+							if (sshCfgs.hosts.length >= MAX_SSH_HOSTS)
+								throw new Error(`at most ${MAX_SSH_HOSTS} hosts can be saved (${added} imported so far)`);
+							const id = `h${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}${added}`;
+							sshCfgs.hosts.push({
+								id,
+								name: c.alias,
+								host: c.host,
+								port: c.port,
+								username: c.username,
+								privateKeyPath: c.privateKeyPath || undefined,
+							});
+							added++;
+						}
+						await saveSshCfgs();
+						broadcastSshState();
+						host.sendTo(clientId, { res: true, reqId, ok: true, action, added, skipped });
 						break;
 					}
 					case "hosts_delete": {
@@ -1375,7 +1566,7 @@ export default {
 						await ensureSshCfgs();
 						const cfg = sshCfgs.hosts.find((x) => x.id === msg.id);
 						if (!cfg) throw new Error("host does not exist");
-						void connectSshHost(cfg, clientId, reqId); // ready/error details
+						void connectSshHost(cfg, clientId, reqId); // replies asynchronously on ready/error; it reports its own failures
 						return;
 					}
 					case "disconnect":
@@ -1391,7 +1582,7 @@ export default {
 						host.sendTo(clientId, { res: true, reqId, ok: true, action });
 						break;
 					}
-					case "shell_input": // details reqId details
+					case "shell_input": // streaming channel with no reqId: failures stay silent, no response protocol
 						if (typeof msg.b64 !== "string") return;
 						try {
 							getSshConn(msg.connId).streams.get(msg.shellId)?.write(Buffer.from(msg.b64, "base64"));
@@ -1416,15 +1607,17 @@ export default {
 		});
 
 		host.log(`activated; workspace root: ${toWire(root)}`);
-		// details
-		// host.onAttach details<0.35details——details
-		// details reqId details
+		// Push the full state to a client as soon as it attaches (the server is the single
+		// source of truth, matching the main app's snapshot architecture).
+		// host.onAttach does not exist on old hosts (<0.35) - optional chaining keeps it
+		// compatible, and the client still has its reqId-based pull as a fallback.
 		const offAttach = host.onAttach?.(async (clientId) => {
 			await ensureSshCfgs();
 			host.sendTo(clientId, { kind: "state", state: publicSshState() });
 		});
-		// details set_cwddetails → details
-		//details.vscode/sftp.json details
+		// The workspace follows the main app's set_cwd live: root changed → the old project's
+		// sync connections are stale (.vscode/sftp.json is per project), and the client is
+		// told to drop its cache and rebuild the tree.
 		const offCwd = host.onCwdChange?.((next) => {
 			root = path.resolve(next);
 			for (const [, c] of syncConns) {
@@ -1459,5 +1652,6 @@ export default {
 	},
 };
 
-// detailshost.cwd details set_cwddetails
-// details —— onCwdChange details
+// Note: host.cwd is live (it follows the main app's set_cwd; on old hosts it is still a
+// startup snapshot). The editor uses it as the workspace root - on onCwdChange it swaps
+// roots, drops the stale sync connections and tells the client.

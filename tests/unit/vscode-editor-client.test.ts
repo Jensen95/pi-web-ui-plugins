@@ -397,6 +397,9 @@ describe("vscode-editor client: modal payload builders", () => {
 		username: " deploy ",
 		password: "s3cret",
 		privateKey: "  ",
+		passphrase: "",
+		privateKeyPath: "  ",
+		agent: "  ",
 		...over,
 	});
 
@@ -408,7 +411,19 @@ describe("vscode-editor client: modal payload builders", () => {
 			username: "deploy",
 			password: "s3cret",
 			privateKey: undefined,
+			passphrase: undefined,
+			privateKeyPath: "",
+			agent: "",
 		});
+	});
+
+	it("passes a key path and agent through trimmed, and a passphrase verbatim", () => {
+		const p = hostPayloadFrom(
+			hostValues({ privateKeyPath: " ~/.ssh/id_ed25519 ", agent: " $SSH_AUTH_SOCK ", passphrase: " pw " }),
+		);
+		expect(p.privateKeyPath).toBe("~/.ssh/id_ed25519");
+		expect(p.agent).toBe("$SSH_AUTH_SOCK");
+		expect(p.passphrase).toBe(" pw ");
 	});
 
 	it("never sends an id - the caller attaches it only when editing", () => {

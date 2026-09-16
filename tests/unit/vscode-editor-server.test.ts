@@ -1476,6 +1476,9 @@ describe("SSH host management", () => {
 			username: "deploy",
 			hasPass: true,
 			hasKey: false,
+			hasPassphrase: false,
+			privateKeyPath: "",
+			agent: "",
 		});
 		expect(JSON.stringify(host)).not.toContain("hunter2");
 		h.deactivate?.();
@@ -1611,6 +1614,9 @@ describe("SSH host management", () => {
 				username: "root",
 				hasPass: false,
 				hasKey: false,
+				hasPassphrase: false,
+				privateKeyPath: "",
+				agent: "",
 			},
 		]);
 		h.deactivate?.();
@@ -2625,5 +2631,61 @@ describe("compiled server artifact", () => {
 		// The bundle must not have inlined the driver: the artifact stays small and
 		// resolves ssh2 from the plugin directory the host installs into.
 		expect(source.length).toBeLessThan(200_000);
+	});
+});
+
+/**
+ * parseSshConfig is a pure module-level export, so it is tested directly: no
+ * host, no ssh2 double, no temporary workspace.
+ */
+describe("vscode-editor: ~/.ssh/config parsing", () => {
+	it("reads alias, hostname, user, port and the first IdentityFile", async () => {
+		const { parseSshConfig } = await import("../../plugins/vscode-editor/src/index");
+		const out = parseSshConfig(
+			[
+				"Host prod",
+				"  HostName 10.0.0.5",
+				"  User deploy",
+				"  Port 2222",
+				"  IdentityFile ~/.ssh/id_ed25519 ~/.ssh/other",
+			].join("\n"),
+		);
+		expect(out).toEqual([
+			{ alias: "prod", host: "10.0.0.5", port: 2222, username: "deploy", privateKeyPath: "~/.ssh/id_ed25519" },
+		]);
+	});
+
+	it("inherits a wildcard block as defaults without emitting it as a candidate", () => 
+		import("../../plugins/vscode-editor/src/index").then(({ parseSshConfig }) => {
+			const out = parseSshConfig(["Host *", "  User root", "  IdentityFile ~/.ssh/id_rsa", "", "Host box"].join("\n"));
+			expect(out).toEqual([
+				{ alias: "box", host: "box", port: 22, username: "root", privateKeyPath: "~/.ssh/id_rsa" },
+			]);
+		}));
+
+	it("skips comments and wildcard aliases, honours = separators and quotes, and keeps the first value", async () => {
+		const { parseSshConfig } = await import("../../plugins/vscode-editor/src/index");
+		const out = parseSshConfig(
+			[
+				"# a comment",
+				'Host web "*.internal"',
+				"  HostName=web1.example.com",
+				"  HostName web2.example.com",
+				"  User = ci",
+				"",
+				"Host gw jump",
+				"  HostName gateway",
+			].join("\n"),
+		);
+		expect(out.map((h) => h.alias)).toEqual(["web", "gw", "jump"]);
+		expect(out[0]).toMatchObject({ host: "web1.example.com", username: "ci", port: 22, privateKeyPath: "" });
+		expect(out[1]).toMatchObject({ host: "gateway", username: "root" });
+	});
+
+	it("returns nothing for empty or credential-free input", async () => {
+		const { parseSshConfig } = await import("../../plugins/vscode-editor/src/index");
+		expect(parseSshConfig("")).toEqual([]);
+		expect(parseSshConfig(undefined)).toEqual([]);
+		expect(parseSshConfig("Host *\n  User root\n")).toEqual([]);
 	});
 });

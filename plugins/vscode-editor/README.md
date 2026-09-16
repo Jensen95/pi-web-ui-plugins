@@ -10,6 +10,9 @@ Provides a VS Code-style workspace view in pi-web-ui:
 - **Download to the computer** (context menu): Local files download directly. Remote files and folders bypass workspace mapping; folders are archived as tar.gz on the remote host, then the save location is selected.
 - **Upload files:** The toolbar ⬆ uploads to the workspace root. The context menu’s Upload file here action targets a folder row, the containing folder of a file row, or, when used on blank tree space, the tree root or first connected SSH host root. Local and remote SFTP are supported. Dragging files onto the tree uses the same targets and a chunked protocol with overwrite confirmation and progress; tree drops are intercepted so they do not trigger the main application’s attach-to-conversation action.
 
+- **SSH host credentials:** A host authenticates with a password, an inline PEM private key, a private key path (`~` expansion supported, and it takes precedence over an inline key), or an ssh-agent socket (`$SSH_AUTH_SOCK`). A passphrase-protected key is supported: the passphrase is stored as a secret alongside the password and key, never in `ssh-hosts.json`.
+- **Import from `~/.ssh/config`** (host editor → Import from ssh config): Parses the file with OpenSSH semantics — the first value in a block wins, a pure `Host *` block only supplies defaults, and wildcard aliases are skipped — then lists the hosts that are not saved yet for selection. Only the `IdentityFile` path is imported; the key's contents are never read.
+
 The former standalone SSH plugin is merged here. The first activation automatically migrates host settings from the old `<pluginDir>/ssh-hosts.json`; no manual migration is needed.
 
 ## File-tree interaction

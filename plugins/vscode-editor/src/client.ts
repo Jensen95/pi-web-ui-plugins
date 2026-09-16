@@ -317,6 +317,10 @@ export function hostPayloadFrom(v: HostFormValues): HostSavePayload {
 		// A blank secret is sent as undefined so the server keeps the stored one.
 		password: v.password || undefined,
 		privateKey: v.privateKey.trim() || undefined,
+		passphrase: v.passphrase || undefined,
+		// Path and agent are not secrets: an empty string clears them.
+		privateKeyPath: v.privateKeyPath.trim(),
+		agent: v.agent.trim(),
 	};
 }
 
@@ -659,8 +663,12 @@ export default {
 			<label>Username</label><input name="h-user" value="root" />
 			<label>Password (leave blank when editing = keep unchanged)</label><input name="h-pass" type="password" autocomplete="off" />
 			<label>Private key (PEM, optional)</label><textarea name="h-key" rows="3" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"></textarea>
-			<div class="hint">Credentials are stored only in this machine's plugin directory (ssh-hosts.json) and are never uploaded. Either a password or a private key is enough.</div>
-			<div class="btns"><button class="cancel">Cancel</button><button class="primary save-host">Save</button></div>
+			<label>Private key path (optional, ~ expansion supported, e.g. ~/.ssh/id_rsa; takes precedence, so the key itself need not be pasted)</label><input name="h-keypath" placeholder="~/.ssh/id_rsa" />
+			<label>Private key passphrase (optional, for a passphrase-protected key)</label><input name="h-pp" type="password" autocomplete="off" />
+			<label>SSH agent socket (optional, e.g. $SSH_AUTH_SOCK; use either this or a password/key)</label><input name="h-agent" placeholder="$SSH_AUTH_SOCK" />
+			<div class="hint">Credentials are stored only in this machine's plugin directory (ssh-hosts.json) and are never uploaded. A password, a private key, a key path or an agent is enough. An existing ~/.ssh/config can be imported directly.</div>
+			<div class="sshcfg-import vsc-hidden"></div>
+			<div class="btns"><button class="cancel">Cancel</button><button class="import-cfg" title="Import hosts from ~/.ssh/config">Import from ssh config</button><button class="primary save-host">Save</button></div>
 		</div>
 	</div>
 </div>`,
@@ -1863,8 +1871,15 @@ export default {
 			q("h-user").value = h?.username ?? "root";
 			q("h-pass").value = "";
 			q("h-key").value = "";
+			q("h-keypath").value = h?.privateKeyPath ?? "";
+			q("h-pp").value = "";
+			q("h-agent").value = h?.agent ?? "";
 			q("h-pass").placeholder = h?.hasPass ? "Saved (leave blank to keep)" : "";
 			q("h-key").placeholder = h?.hasKey ? "Saved (leave blank to keep)" : "-----BEGIN OPENSSH PRIVATE KEY-----";
+			q("h-pp").placeholder = h?.hasPassphrase ? "Saved (leave blank to keep)" : "";
+			const importPanel = requiredQuery<HTMLElement>(hostBg, ".sshcfg-import");
+			importPanel.classList.add("vsc-hidden");
+			importPanel.replaceChildren();
 			hostBg.classList.remove("vsc-hidden");
 			q("h-host").focus();
 		}
@@ -1882,6 +1897,9 @@ export default {
 					username: q("h-user").value,
 					password: q("h-pass").value,
 					privateKey: q("h-key").value,
+					passphrase: q("h-pp").value,
+					privateKeyPath: q("h-keypath").value,
+					agent: q("h-agent").value,
 				}),
 				...(modalEditId ? { id: modalEditId } : {}),
 			};
@@ -1891,6 +1909,67 @@ export default {
 				return;
 			}
 			hostBg.classList.add("vsc-hidden");
+		});
+
+		// ---- Import hosts from ~/.ssh/config -------------------------------------------------
+		requiredQuery<HTMLElement>(hostBg, ".import-cfg").addEventListener("click", async () => {
+			const panel = requiredQuery<HTMLElement>(hostBg, ".sshcfg-import");
+			const hint = (text: string) => {
+				const div = document.createElement("div");
+				div.className = "hint";
+				div.textContent = text;
+				panel.replaceChildren(div);
+			};
+			hint("Reading ~/.ssh/config...");
+			panel.classList.remove("vsc-hidden");
+			const r = await request({ action: "sshconfig_list" });
+			if (!r.ok) {
+				hint(`Read failed: ${r.error}`);
+				return;
+			}
+			const all = r.hosts ?? [];
+			const fresh = all.filter((x) => !x.imported);
+			if (!fresh.length) {
+				hint(`${all.length} host(s) found, all already imported.`);
+				return;
+			}
+			panel.replaceChildren();
+			for (const x of fresh) {
+				const label = document.createElement("label");
+				label.style.cssText = "display:flex;align-items:center;gap:6px;font-weight:normal";
+				const cb = document.createElement("input");
+				cb.type = "checkbox";
+				cb.checked = true;
+				cb.value = x.alias;
+				cb.style.width = "auto";
+				const span = document.createElement("span");
+				span.textContent =
+					`${x.alias} - ${x.username}@${x.host}:${x.port}` + (x.privateKeyPath ? ` (${x.privateKeyPath})` : "");
+				label.append(cb, span);
+				panel.appendChild(label);
+			}
+			const btn = document.createElement("button");
+			btn.className = "primary";
+			btn.textContent = "Import selected";
+			btn.addEventListener("click", async () => {
+				const aliases = [...panel.querySelectorAll<HTMLInputElement>("input[type=checkbox]:checked")].map(
+					(c) => c.value,
+				);
+				if (!aliases.length) {
+					toast("Select at least one host to import");
+					return;
+				}
+				const r2 = await request({ action: "sshconfig_import", aliases });
+				if (!r2.ok) {
+					toast(`Import failed: ${r2.error}`);
+					return;
+				}
+				panel.classList.add("vsc-hidden");
+				panel.replaceChildren();
+				hostBg.classList.add("vsc-hidden");
+				toast(`Imported ${r2.added} host(s)${r2.skipped ? ` (skipped ${r2.skipped})` : ""}`);
+			});
+			panel.appendChild(btn);
 		});
 
 		/** Connect to a host and expand its directory tree (probing home as the starting path). */

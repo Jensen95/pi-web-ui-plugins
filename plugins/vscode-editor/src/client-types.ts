@@ -33,6 +33,19 @@ export interface HostInfo {
 	username: string;
 	hasPass: boolean;
 	hasKey: boolean;
+	hasPassphrase?: boolean;
+	privateKeyPath?: string;
+	agent?: string;
+}
+
+/** An importable host parsed out of the user's `~/.ssh/config`. */
+export interface SshConfigCandidate {
+	alias: string;
+	host: string;
+	port: number;
+	username: string;
+	privateKeyPath: string;
+	imported?: boolean;
 }
 
 /** A live SSH connection as the server publishes it. */ export interface ConnInfo {
@@ -107,6 +120,10 @@ export interface ServerMessage {
 	label?: string;
 	exitCode?: number;
 	output?: string;
+	// sshconfig_list / sshconfig_import.
+	hosts?: SshConfigCandidate[];
+	added?: number;
+	skipped?: number;
 	// sync_get / sync_run.
 	config?: PublicSyncConfig;
 	configPath?: string;
@@ -124,6 +141,9 @@ export interface HostSavePayload {
 	username: string;
 	password: string | undefined;
 	privateKey: string | undefined;
+	passphrase: string | undefined;
+	privateKeyPath: string;
+	agent: string;
 }
 
 /** Payload of the sync_save action. */
@@ -149,6 +169,9 @@ export interface HostFormValues {
 	username: string;
 	password: string;
 	privateKey: string;
+	passphrase: string;
+	privateKeyPath: string;
+	agent: string;
 }
 
 /** Raw input values read out of the sync modal, before trimming and defaults. */
