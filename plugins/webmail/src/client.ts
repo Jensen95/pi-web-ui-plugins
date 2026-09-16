@@ -103,7 +103,7 @@ export default {
 		.wmx .chip.badge { color: var(--amber, #fbbf24); }
 		.wmx .head-actions { margin-left: auto; display: flex; gap: 6px; align-items: center; }
 		.wmx button {
-			background: var(--bg-elev1, #16161d); color: inherit;
+			background: var(--bg-elev, #16161d); color: inherit;
 			border: 1px solid var(--border, #333); border-radius: 6px;
 			padding: 3px 10px; cursor: pointer; font: inherit; font-size: 12px;
 		}
@@ -113,7 +113,7 @@ export default {
 		.wmx button.primary { background: var(--accent, #7c5cff); color: #fff; border-color: transparent; }
 		.wmx button.danger:hover { color: var(--red, #f87171); border-color: var(--red, #f87171); }
 		.wmx input, .wmx select, .wmx textarea {
-			background: var(--bg-elev1, #16161d); color: inherit;
+			background: var(--bg-elev, #16161d); color: inherit;
 			border: 1px solid var(--border, #333); border-radius: 6px;
 			padding: 5px 8px; font: inherit; font-size: 12px; resize: vertical;
 		}
@@ -157,7 +157,7 @@ export default {
 		.wmx .reader pre.body {
 			margin: 0; white-space: pre-wrap; word-break: break-word;
 			font: inherit; max-height: calc(100vh - 340px); max-height: calc(100dvh - 340px); overflow: auto;
-			background: var(--bg-elev1, #16161d); border-radius: 6px; padding: 10px;
+			background: var(--bg-elev, #16161d); border-radius: 6px; padding: 10px;
 		}
 		.wmx .reader .actions { display: flex; gap: 6px; flex-wrap: wrap; }
 
@@ -172,7 +172,7 @@ export default {
 		.wmx .modal-backdrop[hidden] { display: none; }
 		.wmx .modal {
 			width: min(600px, 94vw); max-height: 88vh;
-			background: var(--bg-elev0, #101016); border: 1px solid var(--border, #333);
+			background: var(--bg, #101016); border: 1px solid var(--border, #333);
 			border-radius: 12px; padding: 0; box-shadow: 0 18px 48px rgba(0,0,0,.45);
 			display: flex; flex-direction: column; overflow: hidden;
 		}

@@ -572,7 +572,9 @@ export default {
 				if (storeSecret(secretName, next[sect].pass)) onDisk[sect].pass = "";
 				else degraded = true;
 			}
-			if (degraded) warnSecretsDegraded();
+			// Only warn when the host has a secret facility that failed; a host
+			// without one at all is the documented plaintext fallback, not a fault.
+			if (degraded && sec?.set) warnSecretsDegraded();
 			// 3) The in-memory copy always holds the real password: IMAP/SMTP need it.
 			st.config = next;
 			await saveConfig(host.dir, onDisk);
