@@ -5,62 +5,6 @@
 	"icon": "🖼",
 	"description": "Image workbench: compress with target-size binary search, crop, resize, rotate and flip, convert PNG/JPEG/WebP/AVIF, export batches as ZIP, add watermarks, adjust filters, inspect image information and EXIF, and read or write workspace images. Includes four AI tools for workspace images.",
 	"permissions": ["fs", "http", "tools"],
-	"settings": [
-		{
-			"key": "defaultFormat",
-			"type": "select",
-			"label": "Default output format",
-			"default": "keep",
-			"options": ["keep", "jpeg", "webp", "png", "avif"],
-			"hint": "keep preserves the source format."
-		},
-		{
-			"key": "quality",
-			"type": "number",
-			"label": "Default quality",
-			"default": 0.82,
-			"min": 0.1,
-			"max": 1,
-			"hint": "Used by JPEG, WebP and AVIF."
-		},
-		{
-			"key": "maxDim",
-			"type": "number",
-			"label": "Maximum long edge in pixels",
-			"default": 0,
-			"min": 0,
-			"max": 20000,
-			"hint": "Default resize limit for newly imported images."
-		},
-		{
-			"key": "suffix",
-			"type": "text",
-			"label": "Output filename suffix",
-			"default": "-min",
-			"hint": "For example, -min produces photo-min.webp."
-		},
-		{
-			"key": "overwrite",
-			"type": "boolean",
-			"label": "Overwrite matching files",
-			"default": false,
-			"hint": "Otherwise a numeric suffix is added."
-		},
-		{
-			"key": "aiTools",
-			"type": "boolean",
-			"label": "Enable image AI tools",
-			"default": true,
-			"hint": "Registers image_info, image_transform, image_compress and image_watermark."
-		},
-		{
-			"key": "allowServerDeps",
-			"type": "boolean",
-			"label": "Allow pure-JS codec installation",
-			"default": true,
-			"hint": "JPEG server processing installs jpeg-js once."
-		}
-	],
 	"build": {
 		"install": "npm install --ignore-scripts --no-audit --no-fund esbuild@0.28.2",
 		"command": "npx --no-install esbuild src/index.ts --bundle --platform=node --format=esm --target=es2022 --packages=external --outfile=index.mjs && npx --no-install esbuild src/client.ts --bundle --platform=browser --format=esm --target=es2022 --loader:.css=text --external:./vendor/* --outfile=client/entry.mjs",

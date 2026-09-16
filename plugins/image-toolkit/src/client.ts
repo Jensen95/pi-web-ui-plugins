@@ -98,6 +98,9 @@ export default {
 			activeId: null,
 			lang: detectLang(),
 			tab: "compress",
+			// Whether the mobile bottom settings drawer is collapsed (the grip is hidden on
+			// desktop, so this stays unused there)
+			sheetMin: false,
 			cfg: {},
 			zoom: 0,
 			fit: true,
@@ -718,6 +721,107 @@ export default {
 				],
 			);
 			void dlg;
+		}
+
+		/** Internal plugin settings dialog (the top-right ⚙; it used to live in the host's ⚙ panel). */
+		function openSettingsDialog() {
+			const draft = {
+				defaultFormat: String(app.cfg.defaultFormat ?? "keep"),
+				quality: Number(app.cfg.quality ?? 0.82),
+				maxDim: Number(app.cfg.maxDim ?? 0),
+				suffix: String(app.cfg.suffix ?? "-min"),
+				overwrite: app.cfg.overwrite === true,
+				aiTools: app.cfg.aiTools !== false,
+				allowServerDeps: app.cfg.allowServerDeps !== false,
+			};
+			const fmtSel = el("select", { class: "igt-input" });
+			for (const v of ["keep", "jpeg", "webp", "png", "avif"]) {
+				const opt = el("option", { value: v, text: v === "keep" ? t("cmp.keep") : v.toUpperCase() });
+				if (v === draft.defaultFormat) opt.selected = true;
+				fmtSel.append(opt);
+			}
+			fmtSel.addEventListener("change", () => (draft.defaultFormat = fmtSel.value));
+			const qInput = el("input", {
+				class: "igt-input",
+				type: "number",
+				min: 0.1,
+				max: 1,
+				step: 0.01,
+				value: String(draft.quality),
+			});
+			qInput.addEventListener("input", () => {
+				const n = Number(qInput.value);
+				if (Number.isFinite(n)) draft.quality = n;
+			});
+			const maxInput = el("input", {
+				class: "igt-input",
+				type: "number",
+				min: 0,
+				max: 20000,
+				step: 1,
+				value: String(draft.maxDim),
+			});
+			maxInput.addEventListener("input", () => {
+				const n = Number(maxInput.value);
+				if (Number.isFinite(n)) draft.maxDim = n;
+			});
+			const suffixInput = el("input", { class: "igt-input", value: draft.suffix, spellcheck: "false" });
+			suffixInput.addEventListener("input", () => (draft.suffix = suffixInput.value));
+			const owCb = el("input", { type: "checkbox", checked: draft.overwrite });
+			owCb.addEventListener("change", () => (draft.overwrite = owCb.checked));
+			const aiCb = el("input", { type: "checkbox", checked: draft.aiTools });
+			aiCb.addEventListener("change", () => (draft.aiTools = aiCb.checked));
+			const depCb = el("input", { type: "checkbox", checked: draft.allowServerDeps });
+			depCb.addEventListener("change", () => (draft.allowServerDeps = depCb.checked));
+			const msg = el("div", { class: "igt-hint" });
+			const field = (labelText, inputEl, hintText) =>
+				el("label", { class: "igt-field" }, [
+					el("span", { text: labelText }),
+					inputEl,
+					hintText ? el("div", { class: "igt-hint", text: hintText }) : null,
+				]);
+			const boolField = (labelText, cb, hintText) =>
+				el("div", { class: "igt-field" }, [
+					el("label", { class: "igt-field igt-inline" }, [cb, el("span", { text: labelText })]),
+					el("div", { class: "igt-hint", text: hintText }),
+				]);
+			modal(
+				t("cfg.title"),
+				el("div", { class: "igt-form" }, [
+					field(t("cfg.format"), fmtSel, t("cfg.formatHint")),
+					field(t("cfg.quality"), qInput, t("cfg.qualityHint")),
+					field(t("cfg.maxDim"), maxInput, t("cfg.maxDimHint")),
+					field(t("cfg.suffix"), suffixInput, t("cfg.suffixHint")),
+					boolField(t("cfg.overwrite"), owCb, t("cfg.overwriteHint")),
+					boolField(t("cfg.aiTools"), aiCb, t("cfg.aiToolsHint")),
+					boolField(t("cfg.allowServerDeps"), depCb, t("cfg.allowServerDepsHint")),
+					msg,
+				]),
+				[
+					{ label: t("cfg.cancel"), onClick: () => false },
+					{
+						label: t("cfg.save"),
+						primary: true,
+						onClick: async () => {
+							msg.textContent = t("status.saving");
+							try {
+								const res = await ws.saveSettings(draft);
+								app.cfg = res.settings ?? draft;
+								for (const it of app.items) {
+									if (it.histIndex <= 0) it.state = defaultState(app.cfg);
+								}
+								buildPanel();
+								scheduleRender(true);
+								toast(t("cfg.saved"));
+								return false;
+							} catch (err) {
+								msg.textContent = t("cfg.saveFail", { msg: String(err.message ?? err) });
+								return true;
+							}
+						},
+					},
+				],
+			);
 		}
 
 		/**  */
@@ -1730,6 +1834,9 @@ export default {
 		function renderQueue() {
 			if (!ui) return;
 			ui.queueCount.textContent = `${app.items.length}`;
+			// On mobile the queue is the thumbnail strip at the top: when it is empty, fold
+			// the whole strip away instead of wasting a row of height
+			ui.queue.classList.toggle("igt-empty", !app.items.length);
 			ui.queueList.innerHTML = "";
 			if (!app.items.length) {
 				ui.queueList.append(el("div", { class: "igt-hint igt-queueempty", text: t("queue.empty") }));
@@ -1795,6 +1902,12 @@ export default {
 			const style = el("style", { text: CSS });
 			const top = el("div", { class: "igt-top" });
 			const langBtn = el("button", { class: "igt-btn", text: t("app.lang"), onclick: () => switchLang() });
+			const cfgBtn = el("button", {
+				class: "igt-btn",
+				text: "\u2699",
+				title: t("cfg.title"),
+				onclick: () => openSettingsDialog(),
+			});
 			const importBtn = el("button", {
 				class: "igt-btn igt-primary",
 				text: t("app.import"),
@@ -1823,6 +1936,7 @@ export default {
 				importBtn,
 				wsBtn,
 				clearBtn,
+				cfgBtn,
 				langBtn,
 			);
 
@@ -1911,6 +2025,9 @@ export default {
 					"data-tab": key,
 					onclick: () => {
 						app.tab = key;
+						// Tapping a tab while the mobile drawer is collapsed means "I want to edit
+						// settings", so expand it (otherwise the tap looks like a no-op)
+						if (app.sheetMin) setSheetMin(false);
 						buildPanel();
 						scheduleRender(true);
 					},
@@ -1957,7 +2074,10 @@ export default {
 					onclick: () => void measureExact(),
 				}),
 			]);
-			const panel = el("aside", { class: "igt-panel" }, [tabbar, panelBody, actions]);
+			// Drawer grip: only visible on narrow mobile viewports (the desktop settings
+			// column is always open, so it never needs collapsing)
+			const grip = el("button", { class: "igt-grip", type: "button", onclick: () => setSheetMin(!app.sheetMin) });
+			const panel = el("aside", { class: "igt-panel" }, [grip, tabbar, panelBody, actions]);
 
 			const main = el("div", { class: "igt-main" }, [queue, stage, panel]);
 			const fileInput = el("input", {
@@ -1979,6 +2099,9 @@ export default {
 			ui = {
 				root,
 				style,
+				queue,
+				panel,
+				grip,
 				canvas,
 				cropLayer,
 				frame,
@@ -1996,6 +2119,7 @@ export default {
 				toasts,
 				statusEl: statusline,
 			};
+			syncSheet();
 
 			//  Ctrl/⌘ ——
 			viewwrap.addEventListener(
@@ -2085,6 +2209,20 @@ export default {
 			if (app.compare === on) return;
 			app.compare = on;
 			scheduleRender(true);
+		}
+
+		/** Open/close the mobile bottom settings drawer (on wide screens the grip is hidden,
+		 * so the class is harmless for the three-column layout). */
+		function setSheetMin(min) {
+			app.sheetMin = min;
+			syncSheet();
+		}
+
+		function syncSheet() {
+			if (!ui?.panel) return;
+			ui.panel.classList.toggle("igt-min", app.sheetMin);
+			ui.grip.textContent = app.sheetMin ? `▲ ${t("sheet.expand")}` : `▼ ${t("sheet.collapse")}`;
+			ui.grip.title = app.sheetMin ? t("sheet.expand") : t("sheet.collapse");
 		}
 
 		/**  DOM  */
@@ -2200,6 +2338,8 @@ const CSS = `
 .igt-out { color: var(--accent, #8b5cf6); }
 .igt-good { color: var(--green, #34d399); }
 .igt-panel { width: 320px; flex: none; border-left: 1px solid var(--border, #262a35); display: flex; flex-direction: column; min-height: 0; }
+/* Bottom drawer grip: shown only on narrow mobile viewports (on wide screens the settings column stays open) */
+.igt-grip { display: none; }
 .igt-tabs { display: flex; flex-wrap: wrap; gap: 2px; padding: 6px; border-bottom: 1px solid var(--border-soft, #1e2230); }
 .igt-tab { background: transparent; border: 1px solid transparent; color: var(--text-dim, #9aa1b4); font: inherit; font-size: 12px; padding: 4px 9px; border-radius: 6px; cursor: pointer; }
 .igt-tab:hover { color: var(--text, #e6e8ef); }
@@ -2214,7 +2354,7 @@ const CSS = `
 .igt-input[type="range"] { padding: 0; border: none; background: transparent; }
 .igt-input[type="checkbox"] { width: auto; }
 .igt-color { width: 30px; height: 22px; padding: 0; border: 1px solid var(--border, #262a35); border-radius: 5px; background: none; }
-.igt-btn { background: var(--bg-elev, #14161c); color: inherit; border: 1px solid var(--border, #262a35); border-radius: 6px; padding: 4px 9px; cursor: pointer; font: inherit; font-size: 12px; }
+.igt-btn { background: var(--bg-elev, #14161c); color: inherit; border: 1px solid var(--border, #262a35); border-radius: 6px; padding: 4px 9px; cursor: pointer; font: inherit; font-size: 12px; white-space: nowrap; }
 .igt-btn:hover { border-color: var(--accent, #8b5cf6); }
 .igt-btn.on { background: var(--accent-soft, rgba(139,92,246,.14)); border-color: var(--accent, #8b5cf6); }
 .igt-btn.igt-primary { background: var(--accent, #8b5cf6); border-color: var(--accent, #8b5cf6); color: #fff; }
@@ -2280,4 +2420,77 @@ const CSS = `
 .igt-crop-s { left: 50%; bottom: -6px; margin-left: -5px; cursor: ns-resize; }
 .igt-crop-sw { left: -6px; bottom: -6px; cursor: nesw-resize; }
 .igt-crop-w { left: -6px; top: 50%; margin-top: -5px; cursor: ew-resize; }
+
+/* ---- Mobile (<= 640px): three columns -> stacked rows ---------------------
+   The host app is already a single full-width column on phones, so the fixed
+   three-column widths (queue 236 + stage + panel 320) cannot fit. Instead:
+     top    = queue (horizontal thumbnail strip, thumbnail + delete only)
+     middle = stage (main area, gets as much vertical space as possible)
+     bottom = settings drawer (grip collapses it down to tab row + action row)
+   Every region scrolls on its own, so the plugin root never grows too tall and
+   never adds an outer scrollbar to the host's .plugin-view. */
+@media (max-width: 640px) {
+	.igt-top { padding: 8px 10px; gap: 6px; }
+	.igt-sub { display: none; }
+	.igt-top .igt-btn { padding: 7px 11px; }
+
+	.igt-main { flex-direction: column; }
+
+	/* Queue -> horizontal thumbnail strip at the top */
+	.igt-queue { width: auto; flex: none; border-right: none; border-bottom: 1px solid var(--border, #262a35); }
+	.igt-queue.igt-empty { display: none; }
+	.igt-queue .igt-sec { padding: 3px 8px; border-bottom: none; font-size: 11px; }
+	/* The "drop images / paste with Ctrl+V" hint targets the empty desktop queue; the strip covers it on mobile */
+	.igt-queue > .igt-hint.igt-pad { display: none; }
+	.igt-queue-list { flex-direction: row; align-items: center; overflow-x: auto; overflow-y: hidden; padding: 6px 8px; gap: 6px; }
+	.igt-qitem { flex: none; padding: 3px; gap: 0; }
+	.igt-qthumb { width: 46px; height: 46px; }
+	/* At phone widths the name and size are all ellipsis anyway, so keep the thumbnail only */
+	.igt-qmeta { display: none; }
+	.igt-x { font-size: 17px; padding: 6px 9px; }
+
+	/* Stage: the main area */
+	.igt-stage { flex: 1 1 auto; min-height: 0; }
+	.igt-stagebar { padding: 5px 8px; overflow-x: auto; }
+	.igt-stagebar .igt-btn { flex: none; padding: 7px 10px; }
+	.igt-viewwrap { padding: 8px; }
+	/* Keep the status bar on one line (wrapping keeps squeezing the stage) and scroll it sideways instead */
+	.igt-statusbar { padding: 5px 8px; flex-wrap: nowrap; overflow-x: auto; white-space: nowrap; }
+
+	/* Settings -> bottom drawer */
+	.igt-panel { width: auto; flex: none; border-left: none; border-top: 1px solid var(--border, #262a35); max-height: 66%; }
+	.igt-grip { display: flex; align-items: center; justify-content: center; width: 100%; height: 28px; flex: none; padding: 0; border: none; border-bottom: 1px solid var(--border-soft, #1e2230); background: transparent; color: var(--text-faint, #6b7284); font: inherit; font-size: 11px; cursor: pointer; }
+	.igt-tabs { flex-wrap: nowrap; overflow-x: auto; }
+	.igt-tab { flex: none; padding: 7px 11px; }
+	.igt-panel-body { max-height: min(32vh, 280px); }
+	.igt-panel.igt-min .igt-panel-body { display: none; }
+	.igt-actions { flex-wrap: nowrap; overflow-x: auto; padding: 8px 10px; }
+	.igt-actions .igt-btn { flex: none; padding: 7px 11px; }
+
+	/* Modals / overlays / workspace list: do not waste width, size rows for tapping */
+	.igt-modal { width: min(560px, 94%); max-height: 86%; }
+	.igt-modal-ft .igt-btn { padding: 8px 12px; }
+	.igt-wsitem { padding: 8px 6px; }
+	.igt-wsthumb, .igt-wsicon { width: 40px; }
+	.igt-wsthumb { height: 40px; }
+	.igt-btnrow .igt-btn { padding: 7px 10px; }
+	.igt-toasts { left: 10px; right: 10px; bottom: 10px; }
+	.igt-toast { max-width: none; }
+}
+
+/* ---- Touch input: enlarge handles / sliders / checkboxes so they can be held ---- */
+@media (pointer: coarse) {
+	.igt-crop-h { width: 20px; height: 20px; border-radius: 4px; }
+	.igt-crop-nw { left: -10px; top: -10px; }
+	.igt-crop-n { left: 50%; top: -10px; margin-left: -10px; }
+	.igt-crop-ne { right: -10px; top: -10px; }
+	.igt-crop-e { right: -10px; top: 50%; margin-top: -10px; }
+	.igt-crop-se { right: -10px; bottom: -10px; }
+	.igt-crop-s { left: 50%; bottom: -10px; margin-left: -10px; }
+	.igt-crop-sw { left: -10px; bottom: -10px; }
+	.igt-crop-w { left: -10px; top: 50%; margin-top: -10px; }
+	.igt-input[type="range"] { height: 24px; }
+	.igt-input[type="checkbox"] { width: 18px; height: 18px; }
+	.igt-ctl-hd { min-height: 22px; }
+}
 `;

@@ -75,4 +75,22 @@ export async function fetchSettings() {
 	return r.json();
 }
 
+/** Save the internal plugin config (the view's top-right ⚙ → POST /ws/settings, JSON). */
+export async function saveSettings(values) {
+	const r = await fetch(url("/ws/settings"), {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify(values ?? {}),
+	});
+	const text = await r.text();
+	let data = {};
+	try {
+		data = JSON.parse(text);
+	} catch {
+		/* Not JSON (an HTML 500 page, for example) */
+	}
+	if (!r.ok) throw new Error(data.error || `HTTP ${r.status} ${text.slice(0, 120)}`);
+	return data;
+}
+
 export const IMAGE_EXT = /\.(png|jpe?g|webp|gif|bmp|avif|svg|ico)$/i;

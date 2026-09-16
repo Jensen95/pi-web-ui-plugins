@@ -1,22 +1,30 @@
 // @ts-nocheck
 /**
- * image-toolkit  ——  + 4  AI
+ * image-toolkit server entry — workspace image read/write channel + 4 AI tools.
  *
- * ****🖼  Canvas
- * PNG/JPEG/WebP/GIF/AVIF
+ * Split of work: the pixel work happens mostly in the **browser** (the 🖼 view uses
+ * Canvas: no dependencies, widest format support, it decodes PNG/JPEG/WebP/GIF/AVIF).
+ * This file only does the two things the browser cannot:
  *
- *   1.  ——  HTTP host.route
- *      /plugins-api/image-toolkit/* /  base64/
- *      /  /  host.fs
- *       watcher
+ *   1. Workspace integration — HTTP routes for the view (host.route, exposed as
+ *      /plugins-api/image-toolkit/*): list a directory / read an image (raw bytes,
+ *      no base64) / write an image (raw bytes) / read metadata / read the internal
+ *      plugin config (GET) + save it (POST). Everything goes through host.fs, so
+ *      paths are anchored to the current workspace and escapes are rejected.
  *
- *   2. AI  ——  agent ** JS **
- *      PNG / BMP  core/+  JS JPEG  jpeg-js
- *      host.ensureDeps WebP / GIF / AVIF
+ *      The config lives in the plugin's own storage (the "config" key) and is edited
+ *      in the ⚙ button at the top right of the 🖼 view — no longer through the host's
+ *      declarative manifest settings (the manifest no longer declares any).
  *
+ *   2. AI tools — let the agent work on workspace images directly, using the bundled
+ *      **pure-JS codecs** (PNG / BMP implemented here, see core/) plus the optional
+ *      pure-JS JPEG package jpeg-js (installed once into the plugin directory via
+ *      host.ensureDeps; switchable off in the view's ⚙ settings). WebP / GIF / AVIF
+ *      pixel work stays in the view; the tools say so instead of failing silently.
  *
- * image_info / image_transform / image_compress / image_watermark
- *  path  paths out / outDir / suffix / overwrite
+ * The four tools: image_info / image_transform / image_compress / image_watermark.
+ * All take a single path or a batch of paths, with out / outDir / suffix / overwrite
+ * controlling the output names.
  */
 import { createRequire } from "node:module";
 import { basename, dirname, extname, join, resolve, sep } from "node:path";
@@ -34,23 +42,23 @@ import {
 	rotateImage,
 } from "./ops.ts";
 
-/**  AI  */
+/** Recognised image extensions (used when listing directories and scanning for the AI tools). */
 const IMAGE_EXT = new Set([".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".avif", ".svg", ".ico"]);
 
-/** **** */
+/** Formats the server **can** decode (everything else belongs in the browser). */
 const SERVER_DECODE = new Set(["png", "jpeg", "bmp"]);
-/** ****quality  jpeg  */
+/** Formats the server **can** encode (quality only means something for jpeg). */
 const SERVER_ENCODE = new Set(["png", "jpeg", "bmp"]);
 
-/** jpeg → jpg/ */
+/** Output extension (jpeg → jpg, like most sites and tools). */
 const EXT_OF = { jpeg: "jpg", png: "png", bmp: "bmp", webp: "webp", avif: "avif", gif: "gif" };
 
-/**  200MP  */
+/** Decoded-pixel ceiling: a stray 200MP image must not eat the service process. */
 const MAX_PIXELS = 64_000_000;
 
 const isImageName = (name) => IMAGE_EXT.has(extname(name).toLowerCase());
 
-/**  posix AI  a\b.png ./a.png */
+/** Normalize to a posix-style relative path (the AI often writes a\b.png; ./a.png is tolerated too). */
 function normalizeRel(p) {
 	return String(p ?? "")
 		.replace(/\\/g, "/")
@@ -58,7 +66,7 @@ function normalizeRel(p) {
 		.trim();
 }
 
-/**  */
+/** Human-readable byte size. */
 function fmtBytes(n) {
 	if (!Number.isFinite(n)) return "?";
 	if (n < 1024) return `${n} B`;
@@ -66,7 +74,7 @@ function fmtBytes(n) {
 	return `${(n / 1024 / 1024).toFixed(2)} MB`;
 }
 
-/**  */
+/** Display path: relative to the workspace where possible (shorter and easier to read). */
 function pretty(cwd, rel) {
 	const abs = resolve(cwd, rel);
 	const relToCwd = abs.startsWith(resolve(cwd) + sep) ? abs.slice(resolve(cwd).length + 1) : abs;
@@ -91,7 +99,7 @@ function parseColor(c) {
 	];
 }
 
-/** path / paths  */
+/** Path list from the tool parameters: path and/or paths, de-duplicated, empties dropped. */
 function pathList(params) {
 	const raw = [];
 	if (typeof params.path === "string" && params.path.trim()) raw.push(params.path);
@@ -109,15 +117,101 @@ function pathList(params) {
 
 export default {
 	activate(host) {
-		/**  schema */
-		let cfg = host.getSettings?.() ?? {};
+		/** Internal plugin config (the "config" key in host.storage; edited in the view's ⚙). */
+		const DEFAULTS = {
+			defaultFormat: "keep",
+			quality: 0.82,
+			maxDim: 0,
+			suffix: "-min",
+			overwrite: false,
+			aiTools: true,
+			allowServerDeps: true,
+		};
 
-		/** AI  AI  */
+		/** Normalize before storing: bad values fall back to the default, never to a broken view or tool. */
+		function normalizeConfig(raw) {
+			const r = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+			const fmt = String(r.defaultFormat ?? "keep");
+			const q = Number(r.quality ?? 0.82);
+			const maxDim = Number(r.maxDim ?? 0);
+			return {
+				defaultFormat: ["keep", "jpeg", "webp", "png", "avif"].includes(fmt) ? fmt : "keep",
+				quality: Number.isFinite(q) ? Math.min(1, Math.max(0.1, q)) : 0.82,
+				maxDim: Number.isFinite(maxDim) ? Math.min(20000, Math.max(0, Math.round(maxDim))) : 0,
+				suffix: typeof r.suffix === "string" ? r.suffix : "-min",
+				overwrite: r.overwrite === true,
+				aiTools: r.aiTools !== false,
+				allowServerDeps: r.allowServerDeps !== false,
+			};
+		}
+
+		/** Read the config: storage.config wins; when empty, migrate the old declarative ⚙ panel
+		 *  settings (the "settings" key in storage.json) once; when that is empty too, use defaults. */
+		function loadConfig() {
+			let stored = {};
+			try {
+				stored = host.storage?.get("config", {}) ?? {};
+			} catch {
+				stored = {};
+			}
+			if (stored && typeof stored === "object" && !Array.isArray(stored) && Object.keys(stored).length) {
+				return normalizeConfig({ ...DEFAULTS, ...stored });
+			}
+			let legacy = {};
+			try {
+				legacy = host.getSettings?.() ?? {};
+			} catch {
+				legacy = {};
+			}
+			// The manifest no longer declares settings, so getSettings() returns {} — look for the old
+			// "settings" key directly in the storage table (same file as storage.config, no conflict).
+			if (!legacy || typeof legacy !== "object" || !Object.keys(legacy).length) {
+				try {
+					const all = host.storage?.all?.() ?? {};
+					if (all && typeof all === "object" && all.settings && typeof all.settings === "object") {
+						legacy = all.settings;
+					}
+				} catch {
+					/* Unreadable storage just means no legacy values; not fatal. */
+				}
+			}
+			if (legacy && typeof legacy === "object" && Object.keys(legacy).length) {
+				const migrated = normalizeConfig({ ...DEFAULTS, ...legacy });
+				try {
+					host.storage?.set("config", migrated);
+				} catch {
+					/* If it cannot be stored we migrate again next time; not fatal. */
+				}
+				host.log("Migrated the old ⚙ panel settings into the internal plugin config");
+				return migrated;
+			}
+			return { ...DEFAULTS };
+		}
+
+		let cfg = loadConfig();
+
+		/** Save the config: normalize → persist → broadcast to the view → register/unregister AI tools. */
+		function saveConfig(patch) {
+			cfg = normalizeConfig({
+				...cfg,
+				...(patch && typeof patch === "object" && !Array.isArray(patch) ? patch : {}),
+			});
+			try {
+				host.storage?.set("config", cfg);
+			} catch (err) {
+				host.log("Saving the config failed:", err);
+			}
+			host.broadcast({ kind: "settings", values: cfg });
+			syncTools();
+			return cfg;
+		}
+
+		/** AI tool unregister callbacks (used when "let the AI handle images" is switched off). */
 		let offTools = [];
 		let toolsOn = false;
 
 		// ------------------------------------------------------------------
-		// JPEG  JS  jpeg-js
+		// JPEG codec: the pure-JS jpeg-js, installed on first use (inside the plugin dir)
 		// ------------------------------------------------------------------
 		let jpegTried = false;
 		async function ensureJpeg() {
@@ -132,29 +226,34 @@ export default {
 				if (!ok) return false;
 				const require = createRequire(join(host.dir, "index.mjs"));
 				setJpegCodec(require("jpeg-js"));
-				host.log("jpeg-js  JPEG");
+				host.log("jpeg-js is ready (the server can process JPEG)");
 				return true;
 			} catch (err) {
-				host.log("jpeg-js ", err);
+				host.log("Loading jpeg-js failed:", err);
 				return false;
 			}
 		}
 
-		/**  +  */
+		/** Read + decode a workspace image (unsupported formats get an actionable hint). */
 		async function loadImage(rel) {
 			const buf = await host.fs.read(rel);
 			const format = sniffFormat(buf);
 			if (!SERVER_DECODE.has(format)) {
-				throw new Error(` PNG / JPEG / BMP ${format}` + `WebP / GIF / AVIF  🖼 Canvas `);
+				throw new Error(
+					`The server can only process PNG / JPEG / BMP, and this file is ${format}. ` +
+						`Handle WebP / GIF / AVIF in the 🖼 Image Toolkit view (browser Canvas supports them), which can also save straight back to the workspace.`,
+				);
 			}
 			if (format === "jpeg" && !(await ensureJpeg())) {
-				throw new Error(" JPEG  JS  jpeg-js JS  PNG");
+				throw new Error(
+					'Processing JPEG needs a one-time install of the pure-JS codec package jpeg-js (enable "Allow installing pure-JS codec packages" in the ⚙ settings at the top right of the 🖼 view and retry, or use PNG).',
+				);
 			}
 			const img = await decodeImage(buf, { maxPixels: MAX_PIXELS });
 			return { buf, format, img };
 		}
 
-		/**  AI  */
+		/** List one directory level (relative to the workspace); shared by the AI scan and the view. */
 		async function listDir(relDir) {
 			const entries = await host.fs.list(relDir);
 			return entries
@@ -172,7 +271,7 @@ export default {
 				});
 		}
 
-		/** AI  */
+		/** Recursively scan a directory for images (AI tools only; depth and count are capped). */
 		async function scanImages(relDir, depth, acc, depthLimit = 3) {
 			const entries = await listDir(relDir).catch(() => []);
 			for (const e of entries) {
@@ -186,7 +285,7 @@ export default {
 			return acc;
 		}
 
-		/** out  > outDir +  >  +  -1/-2 */
+		/** Output path: explicit out > outDir + new name > same directory + suffix; collisions get -1/-2. */
 		async function resolveOutPath(rel, ext, o) {
 			const suffix = typeof o.suffix === "string" ? o.suffix : String(cfg.suffix ?? "-min");
 			const explicit = Boolean(o.out);
@@ -213,10 +312,12 @@ export default {
 			return relOut;
 		}
 
-		/**  */
+		/** Encode and write to disk; returns a result summary. */
 		async function writeImage(img, format, quality, rel, o) {
 			if (!SERVER_ENCODE.has(format)) {
-				throw new Error(` PNG / JPEG / BMP ${format}WebP/AVIF  🖼 `);
+				throw new Error(
+					`The server can only write PNG / JPEG / BMP, not ${format} (export WebP/AVIF from the 🖼 view).`,
+				);
 			}
 			const buf = await encodeImage(img, format, { quality });
 			const relOut = await resolveOutPath(rel, EXT_OF[format] ?? format, o);
@@ -225,29 +326,30 @@ export default {
 		}
 
 		/**
-		 *  → / →
-		 *
+		 * Main per-file pipeline: decode → a chain of geometry/color operations → encode and write.
+		 * The return value feeds the tools' text summary and lets a batch report per-file errors
+		 * instead of failing as a whole.
 		 */
 		async function processOne(rel, plan, o) {
 			const { buf: srcBuf, format: srcFormat, img: src } = await loadImage(rel);
 			let img = src;
 			const steps = [];
 
-			// 1) /——
+			// 1) Rotate/flip (geometry first — crop coordinates are in the *rotated* coordinate system)
 			if (plan.rotate) {
 				img = rotateImage(img, Number(plan.rotate));
-				steps.push(` ${Number(plan.rotate)}°`);
+				steps.push(`rotate ${Number(plan.rotate)}°`);
 			}
 			if (plan.flip) {
 				img = flipImage(img, String(plan.flip));
-				steps.push(` ${plan.flip}`);
+				steps.push(`flip ${plan.flip}`);
 			}
 			if (plan.angle) {
 				const bg = parseColor(plan.background) ?? [0, 0, 0, 0];
 				img = rotateArbitrary(img, Number(plan.angle), { background: bg });
-				steps.push(` ${Number(plan.angle)}°`);
+				steps.push(`arbitrary angle ${Number(plan.angle)}°`);
 			}
-			// 2)
+			// 2) Crop
 			if (plan.crop) {
 				const c = plan.crop;
 				img = cropImage(img, {
@@ -256,9 +358,9 @@ export default {
 					width: Number(c.width ?? c.w ?? img.width),
 					height: Number(c.height ?? c.h ?? img.height),
 				});
-				steps.push(` ${img.width}×${img.height}`);
+				steps.push(`crop ${img.width}×${img.height}`);
 			}
-			// 3)
+			// 3) Resize
 			if (plan.resize) {
 				const r = plan.resize;
 				const before = { w: img.width, h: img.height };
@@ -279,21 +381,22 @@ export default {
 					target.width = r.width ? Number(r.width) : undefined;
 					target.height = r.height ? Number(r.height) : undefined;
 				}
-				//  =
+				// No upscaling: keep the source when the target is larger. Exception: when width *and*
+				// height are given explicitly the caller clearly wants that exact size, so allow it.
 				const willUp = (target.width ?? img.width) > img.width || (target.height ?? img.height) > img.height;
 				const exactBoth = Boolean(r.width && r.height);
 				if (r.noUpscale === false || exactBoth || !willUp) {
 					img = resizeImage(img, target);
-					steps.push(` ${before.w}×${before.h} → ${img.width}×${img.height}`);
+					steps.push(`resize ${before.w}×${before.h} → ${img.width}×${img.height}`);
 				}
 			}
-			// 4) /
+			// 4) Color/filters
 			if (plan.adjust && Object.keys(plan.adjust).length) {
 				img = adjustImage(img, plan.adjust);
-				steps.push(` ${Object.keys(plan.adjust).join("/")}`);
+				steps.push(`filters ${Object.keys(plan.adjust).join("/")}`);
 			}
 
-			// 5)
+			// 5) Watermark (image overlay: its path is relative to the workspace too)
 			if (plan.watermarkPath) {
 				const wmRel = normalizeRel(plan.watermarkPath);
 				const { img: wm } = await loadImage(wmRel);
@@ -322,10 +425,10 @@ export default {
 					tile: Boolean(plan.tile),
 					gap: Number(plan.gap ?? 8),
 				});
-				steps.push(` ${wmRel} @${position}`);
+				steps.push(`watermark ${wmRel} @${position}`);
 			}
 
-			// 6)
+			// 6) Output format and quality
 			const format = String(o.format ?? cfg.defaultFormat ?? "keep");
 			const outFormat = !format || format === "keep" ? (SERVER_ENCODE.has(srcFormat) ? srcFormat : "png") : format;
 			const quality = Math.round(Math.min(1, Math.max(0.05, Number(o.quality ?? cfg.quality ?? 0.82))) * 100);
@@ -345,7 +448,7 @@ export default {
 			};
 		}
 
-		/**  processOne error */
+		/** Run processOne over a batch: one failure does not blow up the rest (it lands in error). */
 		async function processMany(rels, plan, o) {
 			const results = [];
 			for (const rel of rels) {
@@ -358,7 +461,7 @@ export default {
 			return results;
 		}
 
-		/**  →  */
+		/** Results → the text summary the model reads. */
 		function summarize(results, title) {
 			const ok = results.filter((r) => !r.error);
 			const bad = results.filter((r) => r.error);
@@ -373,15 +476,15 @@ export default {
 		}
 
 		// ------------------------------------------------------------------
-		// AI /
+		// AI tool registration (switchable from the settings at runtime)
 		// ------------------------------------------------------------------
 		const TOOLS = [
 			{
 				name: "image_info",
-				label: "",
+				label: "Image info",
 				description:
 					"Inspect images in the workspace: format, pixel size, aspect ratio, file bytes, alpha, EXIF (camera/exposure/GPS), plus histogram/dominant colors on request. " +
-					"Use it before compressing or cropping so you know what you are dealing with. Accepts one path, several paths, or a directory to scan. ////EXIF",
+					"Use it before compressing or cropping so you know what you are dealing with. Accepts one path, several paths, or a directory to scan.",
 				promptSnippet: "image_info — inspect workspace image metadata (size/format/EXIF), also scans a directory",
 				promptGuidelines: [
 					"Before compressing or cropping an image, call image_info to learn its real dimensions and format.",
@@ -402,7 +505,7 @@ export default {
 				async execute(_id, params) {
 					const rels0 = pathList(params);
 					const dir = typeof params.dir === "string" ? normalizeRel(params.dir) : "";
-					// dir  =
+					// An explicit dir is always scanned (the empty string = the workspace root)
 					if (typeof params.dir === "string") {
 						const found = await scanImages(dir, 0, []);
 						for (const f of found) if (!rels0.includes(f)) rels0.push(f);
@@ -411,7 +514,7 @@ export default {
 					if (!rels.length) {
 						const entries = await listDir("");
 						const imgs = entries.filter((e) => e.isImage).map((e) => e.path);
-						return ` path/paths/dir${imgs.length ? imgs.join(", ") : ""}`;
+						return `No path/paths/dir given. Images in the workspace root: ${imgs.length ? imgs.join(", ") : "(none)"}`;
 					}
 					const rows = [];
 					for (const rel of rels) {
@@ -433,7 +536,7 @@ export default {
 							};
 							if (params.details && SERVER_DECODE.has(p.format)) {
 								if (p.format === "jpeg" && !(await ensureJpeg())) {
-									row.detailsError = " jpeg-js  JPEG ";
+									row.detailsError = "jpeg-js is required to decode JPEG pixels";
 								} else {
 									const img = await decodeImage(buf, { maxPixels: MAX_PIXELS });
 									const h = histogram(img);
@@ -458,10 +561,10 @@ export default {
 			},
 			{
 				name: "image_transform",
-				label: "/",
+				label: "Image geometry/color",
 				description:
 					"Transform workspace images: resize (width/height/longEdge/percent), crop, rotate 90/arbitrary, flip, and per-pixel adjust (brightness/contrast/saturation/hue/gamma/grayscale/sepia/invert/blur/sharpen/vignette). " +
-					"Writes new files (never overwrites unless asked). Supports batch via `paths`. PNG/JPEG/BMP only — WebP/GIF/AVIF belong in the 🖼 view. //// PNG/JPEG/BMP",
+					"Writes new files (never overwrites unless asked). Supports batch via `paths`. PNG/JPEG/BMP only — WebP/GIF/AVIF belong in the 🖼 view.",
 				promptSnippet:
 					"image_transform — resize / crop / rotate / flip / adjust workspace images (PNG/JPEG/BMP, batch ok)",
 				promptGuidelines: [
@@ -539,25 +642,30 @@ export default {
 						quality: { type: "number", description: "JPEG quality 0.1..1 (ignored by PNG/BMP)." },
 						out: { type: "string", description: "Explicit output path (single file only)." },
 						outDir: { type: "string", description: "Directory for outputs (created if missing)." },
-						suffix: { type: "string", description: "Filename suffix (default from plugin settings, e.g. -min)." },
+						suffix: {
+							type: "string",
+							description: "Filename suffix (default -min; changeable in the 🖼 view ⚙ settings).",
+						},
 						overwrite: { type: "boolean", description: "Allow replacing an existing file." },
 					},
 				},
 				async execute(_id, params) {
 					const rels = pathList(params);
-					if (!rels.length) throw new Error(" path paths");
-					if (rels.length > 1 && params.out) throw new Error(" out outDir + suffix");
+					if (!rels.length) throw new Error("Missing path (or paths)");
+					if (rels.length > 1 && params.out) throw new Error("out cannot be used for a batch (use outDir + suffix)");
 					const results = await processMany(rels, params, params);
-					//
-					return { content: [{ type: "text", text: summarize(results, ` ${results.length} `) }], details: { results } };
+					return {
+						content: [{ type: "text", text: summarize(results, `Processed ${results.length} file(s):`) }],
+						details: { results },
+					};
 				},
 			},
 			{
 				name: "image_compress",
-				label: "",
+				label: "Compress images",
 				description:
 					"Compress workspace images: convert format (png/jpeg/bmp) and/or hit a target file size with a quality binary search (plus downscaling when quality alone is not enough). " +
-					"Use `targetKB` for 'under 300 KB' requests and `quality` for a fixed quality. Batch via `paths`.  + ",
+					"Use `targetKB` for 'under 300 KB' requests and `quality` for a fixed quality. Batch via `paths`.",
 				promptSnippet: "image_compress — shrink workspace images to a quality or a target file size (batch ok)",
 				promptGuidelines: [
 					"To hit a size budget, pass targetKB — do not guess quality by hand, the tool binary-searches it.",
@@ -568,7 +676,10 @@ export default {
 					properties: {
 						path: { type: "string" },
 						paths: { type: "array", items: { type: "string" } },
-						quality: { type: "number", description: "JPEG quality 0.1..1 (default from settings, usually 0.82)." },
+						quality: {
+							type: "number",
+							description: "JPEG quality 0.1..1 (default 0.82; changeable in the 🖼 view ⚙ settings).",
+						},
 						targetKB: { type: "number", description: "Desired maximum file size in KB. Overrides quality." },
 						format: {
 							type: "string",
@@ -586,7 +697,7 @@ export default {
 				},
 				async execute(_id, params) {
 					const rels = pathList(params);
-					if (!rels.length) throw new Error(" path paths");
+					if (!rels.length) throw new Error("Missing path (or paths)");
 					const o = { ...params, format: params.format ?? "jpeg" };
 					const targetBytes = params.targetKB ? Number(params.targetKB) * 1024 : 0;
 					const results = [];
@@ -602,15 +713,18 @@ export default {
 							}
 							const outFormat =
 								String(o.format) === "keep" ? (SERVER_ENCODE.has(srcFormat) ? srcFormat : "jpeg") : String(o.format);
-							if (!SERVER_ENCODE.has(outFormat)) throw new Error(` ${outFormat}`);
-							if (outFormat === "jpeg" && !(await ensureJpeg())) throw new Error(" jpeg-js JS ");
+							if (!SERVER_ENCODE.has(outFormat)) throw new Error(`The server cannot write ${outFormat}`);
+							if (outFormat === "jpeg" && !(await ensureJpeg()))
+								throw new Error(
+									"jpeg-js is required (allow it in the ⚙ settings at the top right of the 🖼 view and retry)",
+								);
 							if (!SERVER_ENCODE.has(srcFormat) && srcFormat === "jpeg") await ensureJpeg();
 
 							let quality = Math.round(Math.min(1, Math.max(0.1, Number(params.quality ?? cfg.quality ?? 0.82))) * 100);
 							let encoded = await encodeImage(img, outFormat, { quality });
 							let usedQuality = quality;
 							if (targetBytes > 0 && outFormat === "jpeg") {
-								// 7  10
+								// Binary search: converge below the target within 7 encodes (quality floor 10)
 								let lo = 10;
 								let hi = 100;
 								let best = null;
@@ -625,7 +739,7 @@ export default {
 									}
 									if (lo > hi) break;
 								}
-								//  →
+								// Still too big at the lowest quality → downscale by area ratio and encode once more
 								if (!best) {
 									const shrink = Math.sqrt(targetBytes / encoded.length);
 									const w = Math.max(1, Math.round(img.width * shrink * 0.98));
@@ -655,15 +769,18 @@ export default {
 							results.push({ in: pretty(host.cwd, rel), error: err instanceof Error ? err.message : String(err) });
 						}
 					}
-					return { content: [{ type: "text", text: summarize(results, ` ${results.length} `) }], details: { results } };
+					return {
+						content: [{ type: "text", text: summarize(results, `Compressed ${results.length} file(s):`) }],
+						details: { results },
+					};
 				},
 			},
 			{
 				name: "image_watermark",
-				label: "",
+				label: "Image watermark",
 				description:
 					"Stamp an image (logo/PNG with alpha) onto workspace images: 9-grid position, opacity, scale, margin, or full tiling. " +
-					"Text watermarks with real fonts are browser-side only (🖼 view). logo",
+					"Text watermarks with real fonts are browser-side only (🖼 view).",
 				promptSnippet: "image_watermark — overlay a logo image onto workspace images (position/opacity/tile)",
 				promptGuidelines: [
 					"image_watermark takes an image overlay, not text — for text watermarks tell the user to use the 🖼 view (real fonts are browser-side).",
@@ -693,49 +810,48 @@ export default {
 				},
 				async execute(_id, params) {
 					const rels = pathList(params);
-					if (!rels.length) throw new Error(" path paths");
-					if (!params.watermarkPath) throw new Error(" watermarkPath");
+					if (!rels.length) throw new Error("Missing path (or paths)");
+					if (!params.watermarkPath) throw new Error("Missing watermarkPath (the overlay image path)");
 					const o = { ...params, suffix: params.suffix ?? "-wm" };
 					const results = await processMany(rels, { watermarkPath: params.watermarkPath, ...params }, o);
-					return { content: [{ type: "text", text: summarize(results, ` ${results.length} `) }], details: { results } };
+					return {
+						content: [{ type: "text", text: summarize(results, `Watermarked ${results.length} file(s):`) }],
+						details: { results },
+					};
 				},
 			},
 		];
 
-		/** / AI  */
+		/** Register/unregister the AI tools according to the settings (idempotent). */
 		function syncTools() {
 			const want = cfg.aiTools !== false;
 			if (want === toolsOn) return;
 			if (want) {
 				offTools = TOOLS.map((t) => host.registerAgentTool(t));
 				toolsOn = true;
-				host.log(`AI ${TOOLS.map((t) => t.name).join(", ")}`);
+				host.log(`AI tools registered: ${TOOLS.map((t) => t.name).join(", ")}`);
 			} else {
 				for (const off of offTools) {
 					try {
 						off();
 					} catch {
-						/*  */
+						/* Ignore unregister failures */
 					}
 				}
 				offTools = [];
 				toolsOn = false;
-				host.log("AI ");
+				host.log("AI tools unregistered (switched off in the settings)");
 			}
 		}
 		syncTools();
-		//  →  → / AI
-		const offSettings = host.onSettingsChanged?.((v) => {
-			cfg = v ?? {};
-			host.broadcast({ kind: "settings", values: cfg });
-			syncTools();
-		});
+		// Config changes come in through POST /ws/settings (the view's ⚙), see the routes below;
+		// the manifest no longer declares settings, so onSettingsChanged never fires.
 
 		// ------------------------------------------------------------------
-		// HTTP
+		// HTTP routes (used by the view)
 		// ------------------------------------------------------------------
 
-		/** JSON base64 10mb JSON  */
+		/** Read the request body: JSON base64 (small images) or raw binary (large ones, no 10mb JSON cap). */
 		async function readBody(req) {
 			const b = req.body;
 			if (b && typeof b === "object" && typeof b.dataBase64 === "string") {
@@ -747,9 +863,10 @@ export default {
 		}
 
 		/**
-		 * handler … HTTP 4xx/5xx
-		 *  promise reject —— handleHttp  try/catch  handler
-		 * rejection  unhandledRejection
+		 * Route wrapper: anything the handler throws (read failure, escape attempt, encode failure…)
+		 * becomes an HTTP 4xx/5xx and never escapes as a rejected promise — the host's handleHttp only
+		 * try/catches synchronous throws, and an async handler's rejection turns into an
+		 * unhandledRejection that takes the whole service down (observed in practice).
 		 */
 		function safeRoute(method, path, handler) {
 			return host.route(method, path, async (req, res) => {
@@ -757,7 +874,7 @@ export default {
 					await handler(req, res);
 				} catch (err) {
 					const msg = err instanceof Error ? err.message : String(err);
-					host.log(`http ${method} ${path} `, err);
+					host.log(`http ${method} ${path} failed:`, err);
 					if (!res.headersSent) res.status(400).json({ error: msg });
 					else res.end();
 				}
@@ -772,7 +889,7 @@ export default {
 		const offImage = safeRoute("GET", "/ws/image", async (req, res) => {
 			const rel = normalizeRel(req.query?.path);
 			if (!rel) {
-				res.status(400).json({ error: " path" });
+				res.status(400).json({ error: "Missing path" });
 				return;
 			}
 			const buf = await host.fs.read(rel);
@@ -783,7 +900,7 @@ export default {
 		const offProbe = safeRoute("GET", "/ws/probe", async (req, res) => {
 			const rel = normalizeRel(req.query?.path);
 			if (!rel) {
-				res.status(400).json({ error: " path" });
+				res.status(400).json({ error: "Missing path" });
 				return;
 			}
 			const buf = await host.fs.read(rel);
@@ -801,16 +918,16 @@ export default {
 		const offSave = safeRoute("POST", "/ws/save", async (req, res) => {
 			const rel = normalizeRel(req.query?.path);
 			if (!rel) {
-				res.status(400).json({ error: " path" });
+				res.status(400).json({ error: "Missing path" });
 				return;
 			}
 			const data = await readBody(req);
 			if (!data.length) {
-				res.status(400).json({ error: "" });
+				res.status(400).json({ error: "The request body is empty" });
 				return;
 			}
 			const overwrite = String(req.query?.overwrite ?? "") === "1";
-			//  resolveOutPath a.png → a-1.png
+			// Without overwrite keep the original stem and let resolveOutPath rename it (a.png → a-1.png)
 			const relOut = overwrite
 				? rel
 				: await resolveOutPath(rel, extname(rel).replace(/^\./, "") || "bin", {
@@ -818,7 +935,7 @@ export default {
 						suffix: "",
 					});
 			await host.fs.write(relOut, data);
-			host.log(` ${pretty(host.cwd, relOut)}${fmtBytes(data.length)}`);
+			host.log(`Saved ${pretty(host.cwd, relOut)} (${fmtBytes(data.length)})`);
 			res.json({
 				ok: true,
 				path: relOut,
@@ -832,26 +949,32 @@ export default {
 			res.json({ cwd: host.cwd, settings: cfg, serverFormats: [...SERVER_ENCODE] });
 		});
 
-		host.log(` ${host.cwd}AI  ${cfg.aiTools === false ? "" : ""}`);
+		const offSaveSettings = safeRoute("POST", "/ws/settings", async (req, res) => {
+			const body = req.body && typeof req.body === "object" && !Buffer.isBuffer(req.body) ? req.body : {};
+			const patch = body.values && typeof body.values === "object" && !Array.isArray(body.values) ? body.values : body;
+			res.json({ ok: true, cwd: host.cwd, settings: saveConfig(patch) });
+		});
 
-		//  /
+		host.log(`Activated; workspace ${host.cwd}; AI tools ${cfg.aiTools === false ? "off" : "on"}`);
+
+		// Deactivation: drop every route and tool registration (plugin removed / service stopped)
 		return () => {
-			for (const off of [offList, offImage, offProbe, offSave, offSettingsRoute, offSettings]) {
+			for (const off of [offList, offImage, offProbe, offSave, offSettingsRoute, offSaveSettings]) {
 				try {
 					off?.();
 				} catch {
-					/*  */
+					/* Ignore */
 				}
 			}
 			for (const off of offTools) {
 				try {
 					off();
 				} catch {
-					/*  */
+					/* Ignore */
 				}
 			}
 			offTools = [];
-			host.log("");
+			host.log("Deactivated");
 		};
 	},
 };
