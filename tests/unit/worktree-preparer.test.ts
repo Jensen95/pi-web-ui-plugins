@@ -252,6 +252,119 @@ describe("worktree preparation server and client", () => {
 	});
 });
 
+/** A prepared aggregate: the root plus a worktree and a copied folder inside it. */
+const RESULT = {
+	root: "/workspace/.pi/projects/new-project",
+	branch: "agent/x",
+	entries: [
+		{ source: "/workspace/repo-a", destination: "/workspace/.pi/projects/new-project/repo-a", kind: "worktree" },
+		{ source: "/workspace/docs", destination: "/workspace/.pi/projects/new-project/docs", kind: "copy" },
+	],
+	errors: [] as string[],
+};
+
+function mountWithHost(host?: unknown): {
+	container: FakeElement;
+	push: (payload: unknown) => number;
+	cleanup: (() => void) | undefined;
+} {
+	const { ctx, push } = createMockViewContext("worktree-preparer");
+	const document = createFakeDocument();
+	if (host !== undefined) document.defaultView.__piWebUiHost = host;
+	const container = document.createElement("div");
+	const cleanup = worktreeClient.mount?.(container as unknown as HTMLElement, ctx);
+	return { container, push, cleanup };
+}
+
+function openButton(container: FakeElement): FakeElement | undefined {
+	return descendants(container).find((element) => element.dataset.action === "open-session");
+}
+
+function viewText(container: FakeElement): string {
+	return descendants(container)
+		.map((element) => element.textContent)
+		.join(" | ");
+}
+
+describe("opening a session on the prepared aggregate", () => {
+	it("offers it once an aggregate exists, and opens the root alone", async () => {
+		const openSession = vi.fn(async (_options: { folders?: string[]; newChat?: boolean }) => ({
+			ok: true,
+			sessionId: "s1",
+		}));
+		const { container, push, cleanup } = mountWithHost({ version: 6, openSession });
+		push({ kind: "state", state: { cwd: "/workspace", folders: [], result: RESULT, error: null } });
+
+		expect(openSession, "nothing may happen before the user asks").not.toHaveBeenCalled();
+		expect(openButton(container), "no open-session control was rendered").toBeDefined();
+		openButton(container)?.click();
+
+		expect(openSession).toHaveBeenCalledTimes(1);
+		// Only the root. The entries live INSIDE it, and the host dedupes workspace
+		// roots by exact string, so passing them would render the same subtree twice
+		// while granting no access the cwd does not already imply.
+		expect(openSession.mock.calls[0]?.[0]?.folders).toEqual([RESULT.root]);
+		cleanup?.();
+	});
+
+	it("refuses to open a half-built aggregate", () => {
+		const openSession = vi.fn(async () => ({ ok: true }));
+		const { container, push, cleanup } = mountWithHost({ version: 6, openSession });
+		// A partial run still carries a usable root, so the button would look safe.
+		push({
+			kind: "state",
+			state: {
+				cwd: "/workspace",
+				folders: [],
+				result: { ...RESULT, errors: ["repo-b: fetch failed"] },
+				error: "repo-b: fetch failed",
+			},
+		});
+
+		expect(openButton(container)).toBeUndefined();
+		expect(openSession).not.toHaveBeenCalled();
+		cleanup?.();
+	});
+
+	it("explains itself on a host without openSession", () => {
+		const { container, push, cleanup } = mountWithHost({ version: 3 });
+		push({ kind: "state", state: { cwd: "/workspace", folders: [], result: RESULT, error: null } });
+
+		openButton(container)?.click();
+		expect(viewText(container)).toMatch(/0\.86/);
+		cleanup?.();
+	});
+
+	it("survives a host that is not there at all", () => {
+		const { container, push, cleanup } = mountWithHost();
+		push({ kind: "state", state: { cwd: "/workspace", folders: [], result: RESULT, error: null } });
+		expect(() => openButton(container)?.click()).not.toThrow();
+		cleanup?.();
+	});
+
+	it("reports a declined directory grant instead of pretending it opened", async () => {
+		// The host prompts for the folder even though it sits inside the workspace:
+		// its grant check is exact-string membership, not a subtree test.
+		const openSession = vi.fn(async () => ({ ok: false, error: "Directory access was declined" }));
+		const { container, push, cleanup } = mountWithHost({ version: 6, openSession });
+		push({ kind: "state", state: { cwd: "/workspace", folders: [], result: RESULT, error: null } });
+
+		openButton(container)?.click();
+		await vi.waitFor(() => expect(viewText(container)).toContain("declined"));
+		cleanup?.();
+	});
+
+	it("reports a thrown call rather than going quiet", async () => {
+		const openSession = vi.fn(async () => Promise.reject(new Error("socket hang up")));
+		const { container, push, cleanup } = mountWithHost({ version: 6, openSession });
+		push({ kind: "state", state: { cwd: "/workspace", folders: [], result: RESULT, error: null } });
+
+		openButton(container)?.click();
+		await vi.waitFor(() => expect(viewText(container)).toContain("socket hang up"));
+		cleanup?.();
+	});
+});
+
 interface FakeElement {
 	tagName: string;
 	textContent: string;

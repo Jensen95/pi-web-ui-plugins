@@ -8,9 +8,19 @@ Creates a disposable aggregate project folder from selected folders in the curre
 - Copied folders exclude `.git`, `node_modules`, `dist`, `build`, and `coverage`.
 - One branch name is used for every repository in the run.
 
-The result includes the absolute aggregate-folder path. This standalone plugin does not change the host workspace or
-open a new session automatically; use the returned path when starting the next session. The host API needed for direct
-project-session switching is proposed in upstream issue [#146](https://github.com/xing-shuyin/pi-web-ui/issues/146).
+The result includes the absolute aggregate-folder path, and a successful run offers **Open session here**, which calls
+`host.openSession({ folders: [root], newChat: true })` (pi-web-ui 0.86+, the #146 API). The host asks you to confirm
+access to the folder first — its grant check is exact-string membership, so it prompts even for a folder inside the
+current workspace. Nothing opens without that click.
+
+Only the aggregate root is passed, deliberately. Its entries live inside it, and the host dedupes workspace roots by
+exact string with no nesting check, so passing them as extra roots would render the same subtree twice while granting
+no access the cwd does not already imply. `set_workspace_roots` also replaces the persisted roots for a cwd, so extra
+roots are not free.
+
+A partial run does not offer the button: a failed repository still leaves a usable `root` with a non-empty `errors`
+array, and opening that folder would look like success while repositories are missing from it. On a host without
+`openSession`, the button says so instead of failing silently.
 
 ## Setup
 

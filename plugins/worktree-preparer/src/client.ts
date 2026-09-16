@@ -10,8 +10,40 @@ interface State {
 	error: string | null;
 }
 
+/** What the host needs from a prepared aggregate to be openable. */
+interface AggregateResult {
+	root: string;
+	errors: string[];
+}
+
+interface SessionHost {
+	version?: number;
+	openSession?(options: { folders: string[]; newChat?: boolean }): Promise<{ ok: boolean; error?: string }>;
+}
+
+const UPGRADE_HINT = "Opening a session here needs pi-web-ui 0.86 or newer.";
+
+/**
+ * The aggregate, but only when it is safe to open.
+ *
+ * A partial run still returns a usable `root` alongside a non-empty `errors`
+ * array, and opening that folder would look like success while some repositories
+ * are simply missing from it. So a half-built aggregate is not openable.
+ */
+function openableAggregate(result: unknown): AggregateResult | null {
+	const value = record(result);
+	if (!value || typeof value.root !== "string" || value.root.trim() === "") return null;
+	const errors = Array.isArray(value.errors) ? value.errors : [];
+	if (errors.length > 0) return null;
+	return { root: value.root, errors: [] };
+}
+
 function record(value: unknown): Record<string, unknown> | null {
 	return value && typeof value === "object" ? (value as Record<string, unknown>) : null;
+}
+
+function messageOf(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
 }
 
 function stateFrom(payload: unknown): State | null {
@@ -41,6 +73,35 @@ export default {
 		if (!document || typeof container.replaceChildren !== "function") return () => {};
 
 		let current: State = { cwd: "", folders: [], result: null, error: null };
+		let sessionNotice = "";
+		let disposed = false;
+
+		const setNotice = (text: string): void => {
+			sessionNotice = text;
+			if (!disposed) render();
+		};
+
+		/** Hand the aggregate to the host. Only the root: its entries are inside it,
+		 *  and the host dedupes workspace roots by exact string, so passing them
+		 *  would render the same subtree twice for no extra access. */
+		const openSession = (root: string): void => {
+			const view = document.defaultView as (Window & { __piWebUiHost?: SessionHost }) | null;
+			const host = view?.__piWebUiHost;
+			if (typeof host?.openSession !== "function") {
+				setNotice(UPGRADE_HINT);
+				return;
+			}
+			setNotice(`Opening ${root}...`);
+			void Promise.resolve(host.openSession({ folders: [root], newChat: true }))
+				.then((receipt) =>
+					receipt?.ok
+						? `Opened a session in ${root}.`
+						: `Could not open the session: ${receipt?.error ?? "the host reported no reason"}`,
+				)
+				.catch((error: unknown) => `Could not open the session: ${messageOf(error)}`)
+				.then(setNotice);
+		};
+
 		let branch: HTMLInputElement;
 		let outputName: HTMLInputElement;
 		let selections: HTMLInputElement[] = [];
@@ -79,7 +140,32 @@ export default {
 			const error = document.createElement("p");
 			error.dataset.field = "error";
 			error.textContent = current.error ?? "";
-			container.replaceChildren(heading, cwd, branch, outputName, ...selections, prepare, status, error);
+			const notice = document.createElement("p");
+			notice.dataset.field = "session";
+			notice.textContent = sessionNotice;
+
+			const aggregate = openableAggregate(current.result);
+			const extras: HTMLElement[] = [];
+			if (aggregate) {
+				const open = document.createElement("button");
+				open.type = "button";
+				open.dataset.action = "open-session";
+				open.textContent = "Open session here";
+				open.addEventListener("click", () => openSession(aggregate.root));
+				extras.push(open);
+			}
+			container.replaceChildren(
+				heading,
+				cwd,
+				branch,
+				outputName,
+				...selections,
+				prepare,
+				status,
+				error,
+				...extras,
+				notice,
+			);
 		};
 
 		render();
@@ -92,6 +178,7 @@ export default {
 		});
 		ctx.send({ action: "get_state" });
 		return () => {
+			disposed = true;
 			unsubscribe();
 			container.replaceChildren();
 		};
