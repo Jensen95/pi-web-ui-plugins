@@ -1,6 +1,7 @@
 import type { JiraReview, JiraTicket } from "./index";
 
 const DEFAULT_READY_JQL = 'assignee IS EMPTY AND statusCategory = "To Do"';
+const POSTED_LABEL = "dogits-dans-le-nez";
 
 interface ModelInfo {
 	id: string;
@@ -9,7 +10,7 @@ interface ModelInfo {
 }
 
 interface StartChatHost {
-	startChat?: (options: { prompt: string; newChat?: boolean; model?: string }) => boolean;
+	startChat?: (options: { prompt: string; newChat?: boolean; model?: string; cwd?: string }) => boolean;
 	models?: { list?: () => readonly ModelInfo[] };
 }
 
@@ -26,6 +27,7 @@ interface ReviewState {
 	tickets?: JiraTicket[];
 	reviews?: Record<string, JiraReview>;
 	reviewing?: Record<string, number>;
+	workspaceCwd?: string;
 	activeSprint?: { id: number; name: string; state: string } | null;
 	error?: string;
 	notice?: string;
@@ -62,19 +64,33 @@ export function startTicketReviews(
 	ticketFolders: Record<string, readonly string[]> = {},
 	delayMs = 0,
 	model = "",
+	cwd = "",
+	onResult?: (ticket: JiraTicket, result: "started" | "failed" | "cancelled") => void,
+	shouldStart: () => boolean = () => true,
 ): number {
-	if (!host || typeof host.startChat !== "function") return 0;
+	if (!host || typeof host.startChat !== "function") {
+		for (const ticket of tickets) onResult?.(ticket, "failed");
+		return 0;
+	}
 	let started = 0;
 	const start = (ticket: JiraTicket): void => {
+		if (!shouldStart()) {
+			onResult?.(ticket, "cancelled");
+			return;
+		}
 		try {
 			const selected = ticketFolders[ticket.key] ?? folders;
-			if (
-				host.startChat!({ prompt: buildReviewPrompt(ticket, selected), newChat: true, ...(model ? { model } : {}) }) !==
-				false
-			)
-				started += 1;
+			const accepted =
+				host.startChat!({
+					prompt: buildReviewPrompt(ticket, selected),
+					newChat: true,
+					...(model ? { model } : {}),
+					...(cwd ? { cwd } : {}),
+				}) !== false;
+			if (accepted) started += 1;
+			onResult?.(ticket, accepted ? "started" : "failed");
 		} catch {
-			// A missing browser bridge should not break the Jira view.
+			onResult?.(ticket, "failed");
 		}
 	};
 	if (!delayMs) {
@@ -155,58 +171,57 @@ function parseBoardUrl(value: string): { siteUrl: string; boardId: string } | un
 }
 
 const VIEW_STYLE = `
-.jira-review { display: grid; gap: 18px; width: min(100%, 1200px); }
-.jira-review__header, .jira-review__toolbar, .jira-review__tickets-panel, .jira-review__folders { padding: 18px; border: 1px solid color-mix(in srgb, currentColor 15%, transparent); border-radius: 14px; background: color-mix(in srgb, currentColor 4%, transparent); }
-.jira-review__header { display: grid; gap: 5px; }
-.jira-review__header h1 { margin: 0; font-size: 1.5rem; letter-spacing: -.02em; }
-.jira-review__header p { margin: 0; opacity: .72; }
-.jira-review__toolbar { display: grid; grid-template-columns: 1fr minmax(220px, .8fr) repeat(2, max-content); gap: 10px; align-items: center; }
-.jira-review__sprint, .jira-review__model { display: grid; gap: 3px; }
-.jira-review__model span { font-size: .8rem; font-weight: 700; letter-spacing: .06em; opacity: .65; text-transform: uppercase; }
-.jira-review__model input { box-sizing: border-box; width: 100%; padding: 8px 9px; border: 1px solid color-mix(in srgb, currentColor 24%, transparent); border-radius: 8px; background: transparent; color: inherit; font: inherit; }
-.jira-review__sprint span { font-size: .8rem; font-weight: 700; letter-spacing: .06em; opacity: .65; text-transform: uppercase; }
-.jira-review__sprint strong { font-size: 1.1rem; }
-.jira-review button { padding: 8px 12px; border: 1px solid color-mix(in srgb, currentColor 28%, transparent); border-radius: 8px; background: transparent; color: inherit; font: inherit; font-weight: 650; cursor: pointer; }
-.jira-review button:hover:not(:disabled) { background: color-mix(in srgb, currentColor 9%, transparent); }
-.jira-review button:disabled { cursor: not-allowed; opacity: .48; }
-.jira-review__settings { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-.jira-review__field { display: grid; gap: 6px; }
+.jira-review { --jr-accent: #1868db; --jr-border: color-mix(in srgb, currentColor 14%, transparent); --jr-muted: color-mix(in srgb, currentColor 66%, transparent); display: grid; gap: 20px; width: min(100%, 1080px); margin-inline: auto; color: inherit; }
+.jira-review__header { display: grid; gap: 5px; padding: 24px 26px; border-radius: 18px; color: #fff; background: linear-gradient(135deg, #0c3b78, #1868db 62%, #579dff); box-shadow: 0 12px 30px color-mix(in srgb, #0c3b78 24%, transparent); }
+.jira-review__header h1 { margin: 0; font-size: clamp(1.55rem, 3vw, 2rem); letter-spacing: -.035em; }
+.jira-review__header p { margin: 0; color: color-mix(in srgb, white 82%, transparent); overflow-wrap: anywhere; }
+.jira-review__toolbar { display: grid; grid-template-columns: minmax(150px, .8fr) minmax(220px, 1fr) repeat(3, max-content); gap: 10px; align-items: end; padding: 14px; border: 1px solid var(--jr-border); border-radius: 14px; background: color-mix(in srgb, currentColor 3%, transparent); }
+.jira-review__sprint, .jira-review__model { display: grid; gap: 5px; }
+.jira-review__sprint span, .jira-review__model span { color: var(--jr-muted); font-size: .72rem; font-weight: 750; letter-spacing: .09em; text-transform: uppercase; }
+.jira-review__sprint strong { font-size: 1.05rem; }
+.jira-review button { min-height: 40px; padding: 8px 13px; border: 1px solid var(--jr-border); border-radius: 9px; background: color-mix(in srgb, currentColor 3%, transparent); color: inherit; font: inherit; font-weight: 680; cursor: pointer; transition: border-color .15s ease, background .15s ease, transform .15s ease; }
+.jira-review button:hover:not(:disabled) { border-color: color-mix(in srgb, var(--jr-accent) 60%, transparent); background: color-mix(in srgb, var(--jr-accent) 10%, transparent); transform: translateY(-1px); }
+.jira-review button[data-action="start-reviews"], .jira-review button[data-action="start-review"] { border-color: var(--jr-accent); background: var(--jr-accent); color: white; }
+.jira-review button:disabled { cursor: not-allowed; opacity: .45; transform: none; }
+.jira-review button:focus-visible, .jira-review input:focus-visible, .jira-review textarea:focus-visible, .jira-review summary:focus-visible, .jira-review a:focus-visible { outline: 3px solid color-mix(in srgb, var(--jr-accent) 55%, transparent); outline-offset: 2px; }
+.jira-review__settings { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; padding: 20px; border: 1px solid var(--jr-border); border-radius: 16px; }
+.jira-review__field { display: grid; gap: 7px; }
 .jira-review__field--wide { grid-column: 1 / -1; }
-.jira-review__field span { font-weight: 600; font-size: .9em; }
-.jira-review__field input, .jira-review__field textarea, .jira-review__ticket-folders { box-sizing: border-box; width: 100%; padding: 9px 10px; border: 1px solid color-mix(in srgb, currentColor 24%, transparent); border-radius: 8px; background: transparent; color: inherit; font: inherit; }
-.jira-review__field textarea { min-height: 88px; resize: vertical; }
+.jira-review__field span { font-weight: 680; font-size: .88rem; }
+.jira-review__field input, .jira-review__field textarea, .jira-review__ticket-folders, .jira-review__model input { box-sizing: border-box; width: 100%; min-height: 40px; padding: 9px 11px; border: 1px solid var(--jr-border); border-radius: 9px; background: color-mix(in srgb, currentColor 2%, transparent); color: inherit; font: inherit; }
+.jira-review__field textarea { min-height: 96px; resize: vertical; }
 .jira-review__actions, .jira-review__ticket-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-.jira-review__folders { display: grid; gap: 12px; }
-.jira-review__folder { display: flex; gap: 7px; align-items: center; }
+.jira-review__folders { display: flex; flex-wrap: wrap; gap: 8px; padding: 0; border: 0; }
+.jira-review__folders > h2 { flex-basis: 100%; margin: 0 0 2px; font-size: .9rem; color: var(--jr-muted); }
+.jira-review__folder { display: flex; gap: 7px; align-items: center; padding: 7px 10px; border: 1px solid var(--jr-border); border-radius: 999px; background: color-mix(in srgb, currentColor 2%, transparent); }
 .jira-review__tickets-panel { display: grid; gap: 14px; }
-.jira-review__tickets-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
-.jira-review__tickets-heading h2 { margin: 0; font-size: 1.05rem; }
-.jira-review__tickets-heading span { color: color-mix(in srgb, currentColor 72%, transparent); font-size: .9rem; }
+.jira-review__tickets-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding-bottom: 8px; border-bottom: 1px solid var(--jr-border); }
+.jira-review__tickets-heading h2 { margin: 0; font-size: 1.15rem; letter-spacing: -.015em; }
+.jira-review__tickets-heading span { color: var(--jr-muted); font-size: .88rem; }
 .jira-review__tickets { display: grid; grid-template-columns: 1fr; gap: 12px; }
-.jira-review__ticket { display: grid; gap: 12px; align-content: start; padding: 16px; border: 1px solid color-mix(in srgb, currentColor 18%, transparent); border-radius: 12px; background: color-mix(in srgb, currentColor 3%, transparent); }
-.jira-review__ticket-header { display: grid; grid-template-columns: max-content 1fr; gap: 6px 9px; }
-.jira-review__ticket-key { font-weight: 750; }
-.jira-review__ticket-summary { grid-column: 1 / -1; font-size: 1.05rem; font-weight: 650; }
-.jira-review__ticket-meta { display: flex; flex-wrap: wrap; gap: 8px; opacity: .72; font-size: .9em; }
-.jira-review__reviewing, .jira-review__review-saved { width: fit-content; margin: 0; padding: 4px 8px; border-radius: 999px; font-size: .82rem; font-weight: 700; background: color-mix(in srgb, #d97706 18%, transparent); color: #a85a00; }
-.jira-review__review-saved { background: color-mix(in srgb, #15803d 18%, transparent); color: #157536; }
-.jira-review__saved { display: grid; gap: 9px; padding: 11px; border-radius: 8px; background: color-mix(in srgb, currentColor 7%, transparent); }
-.jira-review__review-summary { display: flex; flex-wrap: wrap; gap: 8px 14px; font-weight: 650; }
-.jira-review__review-details { display: grid; gap: 7px; }
-.jira-review__review-details summary { cursor: pointer; font-weight: 650; }
-.jira-review__review-details p { margin: 0; max-width: 78ch; }
-.jira-review__hint, .jira-review__empty { margin: 0; opacity: .72; font-size: .9rem; }
-.jira-review__error { margin: 0; color: #b42318; }
-@media (max-width: 900px) {
-  .jira-review__toolbar { grid-template-columns: 1fr 1fr; }
-  .jira-review__sprint { grid-column: 1 / -1; }
-  .jira-review__tickets { grid-template-columns: 1fr; }
-}
-@media (max-width: 600px) {
-  .jira-review__settings { grid-template-columns: 1fr; }
-  .jira-review__field--wide { grid-column: auto; }
-  .jira-review__toolbar { grid-template-columns: 1fr; }
-}
+.jira-review__ticket { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 11px 18px; align-content: start; padding: 18px 20px 18px 24px; border: 1px solid var(--jr-border); border-radius: 14px; background: color-mix(in srgb, currentColor 2%, transparent); box-shadow: 0 3px 14px color-mix(in srgb, black 7%, transparent); overflow: hidden; }
+.jira-review__ticket::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 4px; background: color-mix(in srgb, currentColor 24%, transparent); }
+.jira-review__ticket[aria-busy="true"]::before { background: #e07900; }
+.jira-review__ticket-header, .jira-review__ticket-meta, .jira-review__ticket-folders, .jira-review__hint, .jira-review__saved, .jira-review__error { grid-column: 1; }
+.jira-review__ticket-header { display: grid; grid-template-columns: max-content max-content 1fr; gap: 7px 10px; align-items: center; }
+.jira-review__ticket-key { color: #0c66e4; font-weight: 780; text-decoration: none; }
+.jira-review__ticket-key:hover { text-decoration: underline; }
+.jira-review__ticket-header > span { width: fit-content; padding: 3px 8px; border-radius: 999px; background: color-mix(in srgb, currentColor 8%, transparent); color: var(--jr-muted); font-size: .78rem; font-weight: 680; }
+.jira-review__ticket-summary { grid-column: 1 / -1; margin: 2px 0 0; font-size: 1.08rem; line-height: 1.35; letter-spacing: -.01em; }
+.jira-review__ticket-meta { display: flex; flex-wrap: wrap; gap: 8px; color: var(--jr-muted); font-size: .86rem; }
+.jira-review__reviewing, .jira-review__review-saved { grid-column: 2; grid-row: 1 / span 2; align-self: start; width: fit-content; margin: 0; padding: 5px 9px; border-radius: 999px; font-size: .78rem; font-weight: 750; white-space: nowrap; background: color-mix(in srgb, #e07900 16%, transparent); color: #a54800; }
+.jira-review__review-saved { background: color-mix(in srgb, #1f845a 16%, transparent); color: #167447; }
+.jira-review__saved { display: grid; gap: 10px; padding: 12px 14px; border-radius: 10px; background: color-mix(in srgb, currentColor 5%, transparent); }
+.jira-review__review-summary { display: flex; flex-wrap: wrap; gap: 7px 16px; font-size: .88rem; font-weight: 680; }
+.jira-review__review-details { display: grid; gap: 8px; }
+.jira-review__review-details summary { cursor: pointer; color: #0c66e4; font-weight: 680; }
+.jira-review__review-details p { margin: 0; max-width: 76ch; line-height: 1.5; }
+.jira-review__ticket-actions { grid-column: 2; grid-row: 3 / span 5; align-self: end; justify-content: flex-end; max-width: 230px; }
+.jira-review__hint, .jira-review__empty { margin: 0; color: var(--jr-muted); font-size: .84rem; }
+.jira-review__empty { padding: 36px; border: 1px dashed var(--jr-border); border-radius: 14px; text-align: center; }
+.jira-review__error { margin: 0; padding: 9px 11px; border-radius: 8px; color: #ae2a19; background: color-mix(in srgb, #ae2a19 10%, transparent); }
+@media (max-width: 900px) { .jira-review__toolbar { grid-template-columns: 1fr 1fr; align-items: stretch; } .jira-review__sprint { grid-column: 1 / -1; } }
+@media (max-width: 680px) { .jira-review { gap: 14px; } .jira-review__header { padding: 20px; border-radius: 14px; } .jira-review__settings, .jira-review__toolbar { grid-template-columns: 1fr; } .jira-review__field--wide { grid-column: auto; } .jira-review__ticket { grid-template-columns: 1fr; padding: 16px 16px 16px 20px; } .jira-review__reviewing, .jira-review__review-saved, .jira-review__ticket-actions { grid-column: 1; grid-row: auto; justify-content: flex-start; max-width: none; } .jira-review__ticket-actions button { flex: 1 1 160px; } }
 `;
 
 type Page = "dashboard" | "settings";
@@ -265,6 +280,9 @@ export default {
 		let savedAndCleared = false;
 		let submittedSettings: Record<string, string> | undefined;
 		let reviewingTickets = new Set<string>();
+		let queuedTickets = new Set<string>();
+		let reviewErrors = new Map<string, string>();
+		let queueGeneration = 0;
 		let selectedFolders: string[] = [];
 		let selectedModel = "";
 		let ticketFolderInputs = new Map<string, HTMLInputElement>();
@@ -285,6 +303,11 @@ export default {
 			header.append(
 				makeElement(document, "h1", "Jira settings"),
 				makeElement(document, "p", "Credentials are stored by the plugin server, not in browser storage."),
+				makeElement(
+					document,
+					"p",
+					"Authentication uses your account email and a classic unscoped Atlassian API token.",
+				),
 			);
 
 			const form = makeElement(document, "form") as HTMLFormElement;
@@ -380,12 +403,18 @@ export default {
 			root.className = "jira-review";
 			root.dataset.ui = "jira-dashboard";
 			const config = state.config ?? {};
-			const isReviewing = (key: string): boolean => reviewingTickets.has(key) || !!state.reviewing?.[key];
+			const isReviewing = (key: string): boolean =>
+				queuedTickets.has(key) || reviewingTickets.has(key) || !!state.reviewing?.[key];
 			const header = makeElement(document, "header");
 			header.className = "jira-review__header";
 			header.append(
 				makeElement(document, "h1", "Jira review"),
 				makeElement(document, "p", config.siteUrl ?? "Jira Cloud"),
+				makeElement(
+					document,
+					"p",
+					state.workspaceCwd ? `Workspace: ${state.workspaceCwd}` : "Using the current workspace",
+				),
 			);
 
 			const toolbar = makeElement(document, "div");
@@ -425,15 +454,13 @@ export default {
 			const pendingCount = (state.tickets ?? []).filter(
 				(ticket) => !state.reviews?.[ticket.key] && !isReviewing(ticket.key),
 			).length;
-			const start = makeElement(
-				document,
-				"button",
-				pendingCount
-					? reviewingTickets.size
-						? `Review remaining (${pendingCount})`
-						: `Review all tickets (${pendingCount})`
-					: "Reviews in progress",
-			) as HTMLButtonElement;
+			const hasActiveReviews =
+				queuedTickets.size > 0 || reviewingTickets.size > 0 || Object.keys(state.reviewing ?? {}).length > 0;
+			let bulkLabel = "Reviews in progress";
+			if (pendingCount)
+				bulkLabel = hasActiveReviews ? `Review remaining (${pendingCount})` : `Review all tickets (${pendingCount})`;
+			else if (queuedTickets.size) bulkLabel = `Queued (${queuedTickets.size})`;
+			const start = makeElement(document, "button", bulkLabel) as HTMLButtonElement;
 			start.type = "button";
 			start.dataset.action = "start-reviews";
 			start.disabled = pendingCount === 0;
@@ -449,15 +476,44 @@ export default {
 				// The host creates a tab asynchronously; launching all of them in one event
 				// turn loses every request after the first.
 				selectedModel = modelInput.value.trim();
-				if (startTicketReviews(bridge, ticketsToStart, selectedFolders, overrides, 100, selectedModel)) {
-					for (const ticket of ticketsToStart) {
-						reviewingTickets.add(ticket.key);
-						ctx.send({ action: "start_review", key: ticket.key });
-					}
-					render();
-				}
+				const generation = ++queueGeneration;
+				for (const ticket of ticketsToStart) queuedTickets.add(ticket.key);
+				startTicketReviews(
+					bridge,
+					ticketsToStart,
+					selectedFolders,
+					overrides,
+					250,
+					selectedModel,
+					state.workspaceCwd,
+					(ticket, result) => {
+						queuedTickets.delete(ticket.key);
+						if (result === "started") {
+							reviewingTickets.add(ticket.key);
+							reviewErrors.delete(ticket.key);
+							ctx.send({ action: "start_review", key: ticket.key });
+						} else if (result === "failed") {
+							reviewErrors.set(
+								ticket.key,
+								"Could not start the review chat. Check the selected model and connection, then retry.",
+							);
+						}
+						render();
+					},
+					() => generation === queueGeneration,
+				);
+				render();
 			});
-			toolbar.append(sprint, modelControl, refresh, start);
+			const cancelQueue = makeElement(document, "button", "Cancel queued") as HTMLButtonElement;
+			cancelQueue.type = "button";
+			cancelQueue.dataset.action = "cancel-queue";
+			cancelQueue.disabled = queuedTickets.size === 0;
+			cancelQueue.addEventListener("click", () => {
+				queueGeneration += 1;
+				queuedTickets.clear();
+				render();
+			});
+			toolbar.append(sprint, modelControl, refresh, start, cancelQueue);
 
 			const foldersPanel = makeElement(document, "section");
 			foldersPanel.dataset.ui = "folders";
@@ -503,13 +559,20 @@ export default {
 				const row = makeElement(document, "article");
 				row.className = "jira-review__ticket";
 				row.dataset.key = ticket.key;
+				const titleId = `jira-ticket-${ticket.key}`;
+				row.setAttribute("aria-labelledby", titleId);
+				if (isReviewing(ticket.key)) row.setAttribute("aria-busy", "true");
 				const ticketHeader = makeElement(document, "div");
 				ticketHeader.className = "jira-review__ticket-header";
-				ticketHeader.append(
-					Object.assign(makeElement(document, "span", ticket.key), { className: "jira-review__ticket-key" }),
-					makeElement(document, "span", ticket.status || "No status"),
-					Object.assign(makeElement(document, "strong", ticket.summary), { className: "jira-review__ticket-summary" }),
-				);
+				const jiraLink = makeElement(document, "a", ticket.key);
+				jiraLink.className = "jira-review__ticket-key";
+				jiraLink.setAttribute("href", `${config.siteUrl}/browse/${encodeURIComponent(ticket.key)}`);
+				jiraLink.setAttribute("target", "_blank");
+				jiraLink.setAttribute("rel", "noreferrer");
+				const summary = makeElement(document, "h3", ticket.summary);
+				summary.className = "jira-review__ticket-summary";
+				summary.setAttribute("id", titleId);
+				ticketHeader.append(jiraLink, makeElement(document, "span", ticket.status || "No status"), summary);
 				const meta = makeElement(document, "div");
 				meta.className = "jira-review__ticket-meta";
 				meta.append(makeElement(document, "span", ticket.assignee ? `Assigned to ${ticket.assignee}` : "Unassigned"));
@@ -528,13 +591,26 @@ export default {
 				row.append(ticketHeader, meta, folders, scopeHint);
 				const review = state.reviews?.[ticket.key];
 				if (isReviewing(ticket.key)) {
-					const status = makeElement(document, "p", "Review in progress");
+					const status = makeElement(
+						document,
+						"p",
+						queuedTickets.has(ticket.key) ? "Queued for review" : "Review in progress",
+					);
 					status.className = "jira-review__reviewing";
+					status.setAttribute("role", "status");
+					status.setAttribute("aria-live", "polite");
 					row.append(status);
 				} else if (review) {
-					const status = makeElement(document, "p", "Review saved");
+					const posted = ticket.labels?.includes(POSTED_LABEL);
+					const status = makeElement(document, "p", posted ? "Posted to Jira" : "Review ready");
 					status.className = "jira-review__review-saved";
 					row.append(status, renderReview(document, ticket.key, review));
+				}
+				const reviewError = reviewErrors.get(ticket.key);
+				if (reviewError) {
+					const error = makeElement(document, "p", reviewError);
+					error.className = "jira-review__error";
+					row.append(error);
 				}
 				const startReview = makeElement(
 					document,
@@ -545,16 +621,34 @@ export default {
 				startReview.dataset.action = "start-review";
 				startReview.dataset.key = ticket.key;
 				startReview.disabled = isReviewing(ticket.key);
+				startReview.setAttribute("aria-label", `${review ? "Review again" : "Review ticket"} ${ticket.key}`);
 				startReview.addEventListener("click", () => {
 					const foldersForTicket = parseFolderOverride(folders.value) ?? selectedFolders;
 					selectedModel = modelInput.value.trim();
-					if (startTicketReviews(bridge, [ticket], foldersForTicket, {}, 0, selectedModel)) {
-						reviewingTickets.add(ticket.key);
-						ctx.send({ action: "start_review", key: ticket.key });
-						render();
-					}
+					startTicketReviews(
+						bridge,
+						[ticket],
+						foldersForTicket,
+						{},
+						0,
+						selectedModel,
+						state.workspaceCwd,
+						(_ticket, result) => {
+							if (result === "started") {
+								reviewingTickets.add(ticket.key);
+								reviewErrors.delete(ticket.key);
+								ctx.send({ action: "start_review", key: ticket.key });
+							} else {
+								reviewErrors.set(
+									ticket.key,
+									"Could not start the review chat. Check the selected model and connection, then retry.",
+								);
+							}
+							render();
+						},
+					);
 				});
-				const post = makeElement(document, "button", "Post review") as HTMLButtonElement;
+				const post = makeElement(document, "button", "Post review to Jira") as HTMLButtonElement;
 				post.type = "button";
 				post.dataset.action = "post-review";
 				post.dataset.key = ticket.key;
@@ -565,7 +659,21 @@ export default {
 				});
 				const ticketActions = makeElement(document, "div");
 				ticketActions.className = "jira-review__ticket-actions";
+				ticketActions.setAttribute("role", "group");
+				ticketActions.setAttribute("aria-label", `Actions for ${ticket.key}`);
 				ticketActions.append(startReview, post);
+				if (isReviewing(ticket.key) && !queuedTickets.has(ticket.key)) {
+					const stop = makeElement(document, "button", "Mark review stopped") as HTMLButtonElement;
+					stop.type = "button";
+					stop.dataset.action = "cancel-review";
+					stop.dataset.key = ticket.key;
+					stop.addEventListener("click", () => {
+						reviewingTickets.delete(ticket.key);
+						ctx.send({ action: "cancel_review", key: ticket.key });
+						render();
+					});
+					ticketActions.append(stop);
+				}
 				row.append(ticketActions);
 				ticketGrid.append(row);
 			}
@@ -622,7 +730,10 @@ export default {
 			};
 			if (message.kind === "state") {
 				state = message.state ?? {};
-				for (const key of Object.keys(state.reviews ?? {})) reviewingTickets.delete(key);
+				for (const key of reviewingTickets) {
+					if (!state.reviewing?.[key] && !queuedTickets.has(key)) reviewingTickets.delete(key);
+				}
+				for (const key of Object.keys(state.reviews ?? {})) reviewErrors.delete(key);
 				render();
 			} else if (message.kind === "result" && typeof message.error === "string") {
 				state = { ...state, error: message.error };

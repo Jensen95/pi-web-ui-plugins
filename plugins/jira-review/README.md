@@ -2,8 +2,9 @@
 
 Shows the active sprint from Jira Cloud and filters it with a configurable ready-for-pickup JQL expression.
 
-For each ticket, select workspace folders for the agent to inspect. A review run opens one new pi chat per ticket.
-The agent saves a structured result through `jira_review_save`:
+For each ticket, select workspace folders for the agent to inspect. A review run opens one new pi chat per ticket,
+pinned to the currently selected pi-web-ui project. The plugin follows later project switches and refreshes its workspace
+folder choices. The agent saves a structured result through `jira_review_save`:
 
 - ready for pickup;
 - difficulty: easy, medium, or hard;
@@ -32,6 +33,10 @@ Open the **Settings** page in the plugin view and enter the Jira Cloud site URL,
 ready-ticket JQL. The API token is sent to the plugin server only when settings are saved, then stored in the host secret
 store; it is never returned in browser state or saved in normal plugin storage.
 
-The current plugin contract exposes the browser bridge used to start chats, so review chats use the current workspace.
-The top-bar organizer and automatic project-session switching are intentionally deferred to host support; see upstream
-issue [#146](https://github.com/xing-shuyin/pi-web-ui/issues/146).
+On pi-web-ui host API v11 or newer, the dashboard lists configured models and passes the selected model and current
+workspace explicitly to every review chat. Older hosts keep using the active model. Review launch state is stored by the
+plugin, so reloading the dashboard does not lose in-progress markers; a stale or cancelled run can be cleared with
+**Mark review stopped**.
+
+For visual development, run `node scripts/preview-plugins.mjs`. It builds the plugins and opens a dependency-free preview
+server at `http://127.0.0.1:4173`; use `--no-build` when outputs are already current.

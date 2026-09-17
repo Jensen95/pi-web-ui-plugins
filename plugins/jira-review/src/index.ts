@@ -36,6 +36,8 @@ export interface JiraTicket {
 }
 
 interface Host {
+	readonly cwd?: string;
+	onCwdChange?(handler: (cwd: string) => void): () => void;
 	broadcast(payload: unknown): void;
 	sendTo(clientId: string, payload: unknown): void;
 	notify(level: "info" | "warning" | "error", text: string): void;
@@ -164,6 +166,7 @@ function publicState(
 	tickets: JiraTicket[],
 	reviews: Record<string, JiraReview>,
 	reviewing: Record<string, number>,
+	workspaceCwd: string,
 	folders: string[],
 	error?: string,
 ): Record<string, unknown> {
@@ -174,6 +177,7 @@ function publicState(
 		tickets,
 		reviews,
 		reviewing,
+		workspaceCwd,
 		folders,
 		...(error ? { error } : {}),
 	};
@@ -196,6 +200,7 @@ export default {
 		let activeSprint: JiraSprint | null = null;
 		let tickets: JiraTicket[] = [];
 		let folders: string[] = [];
+		let workspaceCwd = host.cwd ?? "";
 		let error: string | undefined;
 		let reviewStore = loadReviewStore(host.storage.get<unknown>(REVIEWS_KEY, {}));
 		let reviewRuns = (host.storage.get<ReviewRuns>(RUNS_KEY, {}) ?? {}) as ReviewRuns;
@@ -205,7 +210,16 @@ export default {
 		const sendState = (clientId?: string): void => {
 			const payload = {
 				kind: "state",
-				state: publicState(config, activeSprint, tickets, currentReviews(), currentRuns(), folders, error),
+				state: publicState(
+					config,
+					activeSprint,
+					tickets,
+					currentReviews(),
+					currentRuns(),
+					workspaceCwd,
+					folders,
+					error,
+				),
 			};
 			host.broadcast(payload);
 			if (clientId) host.sendTo(clientId, payload);
@@ -295,6 +309,16 @@ export default {
 						sendState(from);
 						break;
 					}
+					case "cancel_review": {
+						const key = String(message.key ?? "").trim();
+						if (!ISSUE_KEY_RE.test(key)) throw new Error("Issue key is invalid");
+						const scope = reviewScope(config);
+						const { [key]: _cancelled, ...remainingRuns } = currentRuns();
+						reviewRuns = { ...reviewRuns, [scope]: remainingRuns };
+						host.storage.set(RUNS_KEY, reviewRuns);
+						sendState(from);
+						break;
+					}
 					case "refresh":
 						await refresh(from);
 						break;
@@ -330,6 +354,19 @@ export default {
 		});
 
 		const offAttach = host.onAttach?.((clientId) => sendState(clientId));
+		const offCwdChange = host.onCwdChange?.((cwd) => {
+			workspaceCwd = cwd;
+			void host.fs
+				.list()
+				.then((entries) => {
+					folders = entries.filter((entry) => entry.type === "dir").map((entry) => entry.name);
+					sendState();
+				})
+				.catch(() => {
+					folders = [];
+					sendState();
+				});
+		});
 		const offTool = host.registerAgentTool({
 			name: "jira_review_save",
 			description: "Save a complete Jira ticket review without posting to Jira.",
@@ -363,6 +400,7 @@ export default {
 		return () => {
 			offMessage();
 			offAttach?.();
+			offCwdChange?.();
 			offTool();
 		};
 	},

@@ -6,6 +6,7 @@ import jiraServer, {
 	CONFIG_KEY,
 	DEFAULT_READY_JQL,
 	REVIEWS_KEY,
+	RUNS_KEY,
 	TAG,
 	validateReview,
 } from "../../plugins/jira-review/src/index";
@@ -97,10 +98,15 @@ describe("Jira API", () => {
 	});
 
 	it("turns Jira HTTP failures into safe errors without exposing the token", async () => {
-		const { request } = requestStub([reply({ errorMessages: ["Forbidden"] }, 403, "Forbidden")]);
+		const { request } = requestStub([
+			reply({ errorMessages: ["Forbidden"] }, 403, "Forbidden"),
+			reply({ errorMessages: ["Unauthorized"] }, 401, "Unauthorized"),
+			reply({ errorMessages: ["Unauthorized"] }, 401, "Unauthorized"),
+		]);
 		const api = createJiraApi(CONFIG.siteUrl, CONFIG.email, TOKEN, request);
 
 		await expect(api.activeSprint("42")).rejects.toThrow(/403/);
+		await expect(api.activeSprint("42")).rejects.toThrow(/classic unscoped API token/i);
 		await expect(api.activeSprint("42")).rejects.not.toThrow(TOKEN);
 	});
 
@@ -178,7 +184,11 @@ describe("Jira review server", () => {
 		expect(lastState(host)).toMatchObject({
 			activeSprint: { id: 7, name: "Sprint 12" },
 			tickets: [{ key: "ABC-1", summary: "Ready ticket", status: "To Do" }],
+			workspaceCwd: host.cwd,
 		});
+		await host.emit.notifyCwd("/workspace/new-project");
+		await new Promise((resolve) => setImmediate(resolve));
+		expect(lastState(host)).toMatchObject({ workspaceCwd: "/workspace/new-project" });
 		expect(lastState(host).config).not.toHaveProperty("apiToken");
 		expect(lastState(host).config).not.toHaveProperty("token");
 		expect(calls.every((call) => call.init?.method !== "POST" && call.init?.method !== "PUT")).toBe(true);
@@ -208,6 +218,23 @@ describe("Jira review server", () => {
 		);
 		expect(lastState(host)).toMatchObject({ error: expect.stringMatching(/confidence/i) });
 		expect(host.recorded.storage.get(REVIEWS_KEY)).not.toHaveProperty(`${CONFIG.siteUrl}.ABC-3`);
+		deactivate?.();
+	});
+
+	it("persists review launch state until a review is saved or stopped", async () => {
+		const host = createMockHost({ permissions: ["http", "tools", "fs"], storage: { [CONFIG_KEY]: CONFIG } });
+		const deactivate = jiraServer.activate(host);
+
+		await host.emit.message({ action: "start_review", key: "ABC-1" }, "client-1");
+		expect(host.recorded.storage.get(RUNS_KEY)).toMatchObject({ [CONFIG.siteUrl]: { "ABC-1": expect.any(Number) } });
+		expect(lastState(host)).toMatchObject({ reviewing: { "ABC-1": expect.any(Number) } });
+
+		await host.emit.message({ action: "cancel_review", key: "ABC-1" }, "client-1");
+		expect(lastState(host)).toMatchObject({ reviewing: {} });
+
+		await host.emit.message({ action: "start_review", key: "ABC-1" }, "client-1");
+		await host.emit.message({ action: "save_review", key: "ABC-1", review: review() }, "client-1");
+		expect(lastState(host)).toMatchObject({ reviewing: {}, reviews: { "ABC-1": expect.any(Object) } });
 		deactivate?.();
 	});
 
@@ -546,8 +573,8 @@ describe("Jira review client", () => {
 		descendants(container)
 			.find((element) => element.dataset.action === "start-reviews")!
 			.click();
-		expect(descendants(container).some((element) => element.textContent === "Review in progress")).toBe(true);
-		vi.advanceTimersByTime(100);
+		expect(descendants(container).some((element) => element.textContent === "Queued for review")).toBe(true);
+		vi.advanceTimersByTime(250);
 		expect(startChat).toHaveBeenCalledTimes(1);
 		expect(startChat.mock.calls[0]![0].prompt).toContain("docs");
 		const reviewPanel = descendants(container).find((element) => element.dataset.review === "ABC-1");
@@ -577,6 +604,7 @@ describe("Jira review client", () => {
 				folders: ["src"],
 				tickets: [{ key: "ABC-1", summary: "First", description: "One", status: "To Do" }],
 				reviews: {},
+				workspaceCwd: "/workspace/current-project",
 			},
 		});
 		const model = descendants(container).find((element) => element.dataset.field === "review-model");
@@ -589,7 +617,10 @@ describe("Jira review client", () => {
 
 		expect(startChat).toHaveBeenCalledTimes(1);
 		expect(startChat.mock.calls[0]![0].prompt).toContain("ABC-1");
-		expect(startChat.mock.calls[0]![0].model).toBe("openai/gpt-5-mini");
+		expect(startChat.mock.calls[0]![0]).toMatchObject({
+			model: "openai/gpt-5-mini",
+			cwd: "/workspace/current-project",
+		});
 		expect(descendants(container).some((element) => element.textContent === "Review in progress")).toBe(true);
 		expect(descendants(container).find((element) => element.dataset.action === "start-review")?.disabled).toBe(true);
 	});
