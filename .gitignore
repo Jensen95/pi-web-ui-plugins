@@ -3,6 +3,7 @@ node_modules/
 
 # Build artifacts
 dist/
+.vitest/
 
 # Release and OS files
 release/

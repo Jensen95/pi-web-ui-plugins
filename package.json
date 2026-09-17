@@ -2,6 +2,9 @@
 	"name": "pi-web-ui-plugins",
 	"version": "0.1.0",
 	"private": true,
+	"workspaces": [
+		"packages/*"
+	],
 	"type": "module",
 	"description": "English-only TypeScript ports of pi-web-ui interface plugins plus the standalone Page Picker browser extension.",
 	"license": "MIT",
@@ -16,10 +19,10 @@
 		"node": ">=22.19.0"
 	},
 	"scripts": {
-		"test": "vitest run",
+		"test": "vitest run && npm run test:unit --workspace packages/pi-claude-agent-sdk",
 		"test:watch": "vitest",
-		"typecheck": "tsc -p tsconfig.json --noEmit",
-		"lint": "oxlint plugins/ scripts/ tests/",
+		"typecheck": "tsc -p tsconfig.json --noEmit && npm run typecheck --workspace packages/pi-claude-agent-sdk",
+		"lint": "oxlint packages/ plugins/ scripts/ tests/",
 		"lint:fix": "oxlint --fix plugins/ scripts/ tests/",
 		"format": "prettier --write .",
 		"format:check": "prettier --check .",

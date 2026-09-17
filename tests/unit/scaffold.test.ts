@@ -166,11 +166,11 @@ describe("root package", () => {
 		expect(pkg.scripts.lint).toContain("oxlint");
 	});
 
-	it("is one private ESM package with no workspaces", () => {
+	it("is one private ESM package with the shared workspace", () => {
 		expect(pkg.type).toBe("module");
 		expect(pkg.private).toBe(true);
 		expect(pkg.name).toBe("pi-web-ui-plugins");
-		expect(pkg.workspaces).toBeUndefined();
+		expect(pkg.workspaces).toEqual(["packages/*"]);
 		expect(pkg.engines).toMatchObject({ node: ">=22.19.0" });
 	});
 

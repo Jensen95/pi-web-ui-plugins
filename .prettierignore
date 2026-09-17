@@ -7,3 +7,6 @@ plugins/*/src/*.js
 plugins/*/index.mjs
 plugins/*/client/entry.mjs
 plugins/*/client/vendor/
+
+# Upstream provider package keeps its own formatting and test harness.
+packages/pi-claude-agent-sdk/
