@@ -2,7 +2,8 @@
  * Stopgap stylesheet for two top-bar overflow-menu bugs in pi-web-ui.
  *
  * 1. xing-shuyin/pi-web-ui#162 - the menu is clipped by `.view-switch`.
- * 2. 0.87.x - the menu is portalled to `document.body` (which fixed #162) but
+ * 2. xing-shuyin/pi-web-ui#183 - on 0.87.x the menu is portalled to
+ *    `document.body` (which fixed #162) but
  *    now clips and restyles the host controls rendered inside it.
  *
  * The host renders the top-bar overflow menu (`⋯`, `.plugin-topbar-menu`) inside
@@ -38,7 +39,11 @@
  * Delete this plugin once both ship upstream.
  */
 
+/** The clipped-by-.view-switch bug: fixed upstream by portalling the menu. */
 export const ISSUE_URL = "https://github.com/xing-shuyin/pi-web-ui/issues/162";
+/** The portal bug this plugin now mostly exists for: the portalled menu clips
+ *  and flattens the host controls rendered inside it. */
+export const PORTAL_ISSUE_URL = "https://github.com/xing-shuyin/pi-web-ui/issues/183";
 export const STYLE_ID = "pi-web-ui-plugins-topbar-fix";
 /** Must match manifest.json "name": the host puts it in the tab's title. */
 const PLUGIN_NAME = "Top Bar Fix";
@@ -136,12 +141,27 @@ const clientEntry = {
 			".view-switch so it can never be seen, and 0.87.x hosts clip and flatten the Theme, Language " +
 			"and Sound controls rendered inside the portalled menu. If you are reading this, its tab failed " +
 			"to hide itself, which means the patch no longer matches the host markup.";
-		const link = document.createElement("a");
-		link.href = ISSUE_URL;
-		link.target = "_blank";
-		link.rel = "noreferrer";
-		link.textContent = "Upstream issue 162";
-		root.append(heading, body, link);
+		const links = document.createElement("p");
+		// Index, not childNodes: the host DOM is real, but the unit test drives this
+		// with a minimal element stub that has no childNodes.
+		const issues = [
+			[ISSUE_URL, "Upstream issue 162"],
+			[PORTAL_ISSUE_URL, "Upstream issue 183"],
+		] as const;
+		issues.forEach(([href, text], index) => {
+			const link = document.createElement("a");
+			link.href = href;
+			link.target = "_blank";
+			link.rel = "noreferrer";
+			link.textContent = text;
+			if (index > 0) {
+				const gap = document.createElement("span");
+				gap.textContent = " · ";
+				links.append(gap);
+			}
+			links.append(link);
+		});
+		root.append(heading, body, links);
 		container.append(root);
 		return () => container.replaceChildren();
 	},

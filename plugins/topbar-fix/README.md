@@ -1,6 +1,6 @@
 # Top Bar Fix (topbar-fix)
 
-A stopgap stylesheet for two top-bar overflow-menu bugs: [pi-web-ui#162](https://github.com/xing-shuyin/pi-web-ui/issues/162)
+A stopgap stylesheet for two top-bar overflow-menu bugs: [pi-web-ui#162](https://github.com/xing-shuyin/pi-web-ui/issues/162) and [pi-web-ui#183](https://github.com/xing-shuyin/pi-web-ui/issues/183)
 (the menu is clipped away entirely) and a follow-up in 0.87.x (the menu is portalled, and now clips and flattens the
 host controls rendered inside it). Delete this plugin once both ship upstream.
 
