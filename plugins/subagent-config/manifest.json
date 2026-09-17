@@ -1,0 +1,24 @@
+{
+	"id": "subagent-config",
+	"name": "Subagent Config",
+	"version": "0.1.0",
+	"icon": "🧩",
+	"description": "Edit the @tintinweb/pi-subagents configuration from the browser: agent files across all three discovery layers and subagents.json, with model pins validated against the model store so an unresolvable pin cannot silently inherit the parent session model.",
+	"permissions": ["fs", "ui"],
+	"ui": {
+		"settings.pages": [
+			{
+				"id": "subagents",
+				"label": "Subagent Config",
+				"icon": "🧩",
+				"kind": "page"
+			}
+		]
+	},
+	"view": false,
+	"build": {
+		"install": "npm install --ignore-scripts --no-audit --no-fund esbuild@0.28.2",
+		"command": "npx --no-install esbuild src/index.ts --bundle --platform=node --format=esm --target=es2022 --packages=external --outfile=index.mjs && npx --no-install esbuild src/client.ts --bundle --platform=browser --format=esm --target=es2022 --loader:.css=text --external:./vendor/* --outfile=client/entry.mjs",
+		"outputs": ["index.mjs", "client/entry.mjs"]
+	}
+}

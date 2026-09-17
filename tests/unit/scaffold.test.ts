@@ -33,6 +33,7 @@ const EXPECTED_PLUGIN_IDS = [
 	"mcp-manager",
 	"mermaid",
 	"run-trace",
+	"subagent-config",
 	"topbar-fix",
 	"ui-shortcuts",
 	"vscode-editor",

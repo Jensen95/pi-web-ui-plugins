@@ -24,7 +24,7 @@ import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { CJK_RE, findCjk, formatCjkHits, isGitIgnored, pluginIds, repoPath } from "../helpers/repo-files";
 
-/** The twelve plugins this repo ships, and the source entries each one must compile to. */
+/** The thirteen plugins this repo ships, and the source entries each one must compile to. */
 const EXPECTED_ARTIFACTS: Record<string, { server: boolean; client: boolean }> = {
 	"catalog-sync": { server: false, client: true },
 	"db-client": { server: true, client: true },
@@ -33,6 +33,7 @@ const EXPECTED_ARTIFACTS: Record<string, { server: boolean; client: boolean }> =
 	"mcp-manager": { server: true, client: true },
 	mermaid: { server: false, client: true },
 	"run-trace": { server: true, client: true },
+	"subagent-config": { server: true, client: true },
 	"ui-shortcuts": { server: false, client: true },
 	"vscode-editor": { server: true, client: true },
 	webmail: { server: true, client: true },
@@ -168,7 +169,7 @@ function isNodeBuiltin(specifier: string): boolean {
 }
 
 describe("plugin manifests", () => {
-	it("exist for exactly the twelve plugins this repo ships", () => {
+	it("exist for exactly the thirteen plugins this repo ships", () => {
 		expect(pluginIds(), "plugin directories under plugins/ must match the ported set").toEqual(EXPECTED_IDS);
 		for (const id of EXPECTED_IDS) {
 			expect(existsSync(repoPath(manifestRel(id))), `${manifestRel(id)} is missing`).toBe(true);

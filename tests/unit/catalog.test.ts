@@ -16,7 +16,7 @@ import { findCjk, formatCjkHits, repoPath } from "../helpers/repo-files";
 
 const CATALOG_REL = "plugins/catalog.json";
 
-/** The twelve plugins this repo ships. legado-web and demo-mailbox are not ported. */
+/** The thirteen plugins this repo ships. legado-web and demo-mailbox are not ported. */
 const EXPECTED_IDS = [
 	"catalog-sync",
 	"db-client",
@@ -25,6 +25,7 @@ const EXPECTED_IDS = [
 	"mcp-manager",
 	"mermaid",
 	"run-trace",
+	"subagent-config",
 	"topbar-fix",
 	"ui-shortcuts",
 	"vscode-editor",

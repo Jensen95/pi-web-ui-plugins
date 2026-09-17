@@ -88,6 +88,14 @@
 		"homepage": "https://github.com/Jensen95/pi-web-ui-plugins/tree/main/plugins/worktree-preparer"
 	},
 	{
+		"id": "subagent-config",
+		"name": "Subagent Config",
+		"icon": "🧩",
+		"description": "Edit the pi-subagents configuration from Settings: agent files in every discovery layer and subagents.json, with model pins checked against the model store so an unresolvable pin cannot silently inherit the parent session model.",
+		"source": "Jensen95/pi-web-ui-plugins/plugins/subagent-config",
+		"homepage": "https://github.com/Jensen95/pi-web-ui-plugins/tree/main/plugins/subagent-config"
+	},
+	{
 		"id": "topbar-fix",
 		"name": "Top Bar Fix",
 		"icon": "🩹",

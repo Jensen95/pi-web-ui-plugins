@@ -23,6 +23,7 @@ These are English-only TypeScript ports of the upstream plugins. See
 | `image-toolkit`     | 🖼    | Compresses, crops, resizes, converts, watermarks and inspects workspace images, with four AI tools.                          | `fs`, `http`, `tools`                     |
 | `ui-shortcuts`      | ⌨️   | Switches between the Terminal, Editor and Run Trace views, with a small UI for custom view, compose, and new-chat shortcuts. | none                                      |
 | `worktree-preparer` | 🌿   | Assembles selected workspace folders and Git repositories into a fresh multi-project worktree folder.                        | `fs`, `terminal`                          |
+| `subagent-config`   | 🧩   | Settings page that edits pi-subagents agent files and `subagents.json`, validating model pins against the model store.       | `fs`, `ui`                                |
 
 `plugins/catalog.json` is the machine-readable form of this table. pi-web-ui reads it as its built-in
 plugin-marketplace list, so the two must not drift.
@@ -87,6 +88,7 @@ npm run build:extension  # build the standalone Page Picker browser extension
 npm run build:catalog-sync # compile the catalog sync plugin
 npm run build:jira-review  # compile the Jira review plugin
 npm run build:worktree-preparer # compile the worktree preparer plugin
+npm run build:subagent-config # compile the subagent config plugin
 npm run build:mermaid    # compile one plugin (also available for every other id)
 npm test                 # vitest, tests/unit/*.test.ts
 npm run typecheck        # tsc --noEmit, strict, over plugin and extension TypeScript plus tests
