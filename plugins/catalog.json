@@ -99,7 +99,7 @@
 		"id": "topbar-fix",
 		"name": "Top Bar Fix",
 		"icon": "🩹",
-		"description": "Stopgap stylesheet for pi-web-ui issue 162: the top-bar overflow menu is clipped by .view-switch and can never be seen. Remove once fixed upstream.",
+		"description": "Stopgap stylesheet for two top-bar overflow menu bugs: pi-web-ui issue 162 clips the menu inside .view-switch, and on 0.87.x the portalled menu clips and flattens the host controls rendered inside it. Remove once fixed upstream.",
 		"source": "Jensen95/pi-web-ui-plugins/plugins/topbar-fix",
 		"homepage": "https://github.com/Jensen95/pi-web-ui-plugins/tree/main/plugins/topbar-fix"
 	}

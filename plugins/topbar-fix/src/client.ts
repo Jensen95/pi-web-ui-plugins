@@ -1,5 +1,9 @@
 /**
- * Stopgap stylesheet for xing-shuyin/pi-web-ui#162.
+ * Stopgap stylesheet for two top-bar overflow-menu bugs in pi-web-ui.
+ *
+ * 1. xing-shuyin/pi-web-ui#162 - the menu is clipped by `.view-switch`.
+ * 2. 0.87.x - the menu is portalled to `document.body` (which fixed #162) but
+ *    now clips and restyles the host controls rendered inside it.
  *
  * The host renders the top-bar overflow menu (`⋯`, `.plugin-topbar-menu`) inside
  * `.view-switch`. That element carries `overflow: hidden` so its
@@ -21,7 +25,17 @@
  * horizontal scrolling is what keeps a narrow window usable, so it is left
  * alone: a hidden menu beats an unreachable top bar.
  *
- * Delete this plugin once #162 ships.
+ * The second bug: in 0.87.x the menu is `createPortal(<div class="plugin-topbar-menu
+ * portal">, document.body)`, and a host control switched off the top bar in
+ * Settings (Theme, Language, Sound, Update) is re-rendered inside it as the real
+ * host Dropdown - `.dropdown > button.chip` plus an absolutely positioned
+ * `.dd-menu`. Two host rules then misfire on it: the portal's `overflow-y: auto`
+ * makes overflow-x compute to `auto` as well, which clips the wider `.dd-menu`
+ * on its left overhang (the sliced "ANGUAGE"/"HEME" headings), and the unscoped
+ * `.plugin-topbar-menu button` rule outranks `.chip` and `.dd-item` and flattens
+ * their flex layout.
+ *
+ * Delete this plugin once both ship upstream.
  */
 
 export const ISSUE_URL = "https://github.com/xing-shuyin/pi-web-ui/issues/162";
@@ -30,11 +44,44 @@ export const STYLE_ID = "pi-web-ui-plugins-topbar-fix";
 const PLUGIN_NAME = "Top Bar Fix";
 
 export const PATCH_CSS = `
-/* pi-web-ui#162: release the overflow menu from its clipping ancestor. */
+/* pi-web-ui#162: release the overflow menu from its clipping ancestor. Hosts
+   from 0.87 portal the menu to document.body, so .view-switch is no longer an
+   ancestor and this is a harmless no-op there - it is kept for older hosts. */
 .view-switch { overflow: visible; }
 /* Put back the corner clipping that overflow:hidden was providing. */
 .view-switch > :first-child { border-radius: 8px 0 0 8px; }
 .view-switch > :last-child { border-radius: 0 8px 8px 0; }
+/* 0.87.x: the portalled menu declares overflow-y:auto, so per CSS Overflow its
+   overflow-x computes to auto too and clips. A nested .dd-menu is right-anchored
+   and min-width:340px inside a max-width:320px menu, so it overhangs the LEFT
+   edge and is sliced off with no scroll position that can reach it. Only
+   overflow:visible lifts the clip (overflow-x alone recomputes back to auto),
+   so gate it on a panel actually being open: .dd-menu is in the DOM only while
+   its dropdown is open, so a long plain overflow menu keeps its scrolling. */
+.plugin-topbar-menu.portal:has(.dd-menu) { overflow: visible; }
+/* The host's ".plugin-topbar-menu button" (0,1,1) is unscoped and outranks
+   .chip (0,1,0), so a dropdown TRIGGER inside the menu gets display:block,
+   width:100% and border:0 - its icon, label and caret stop being a row and the
+   box stops fitting them. Restore just the layout, at (0,2,1), with the host's
+   own .chip values. The child combinator keeps this off panel items. */
+.plugin-topbar-menu .dropdown > button {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	width: auto;
+	border: 1px solid var(--border);
+	border-radius: 9px;
+}
+/* The same host rule outranks .dd-item (0,1,0) inside the opened panel, so its
+   rows lose flex and space-between and the .dd-item.active:after checkmark
+   stops sitting at the right edge. overflow/text-overflow are left alone: the
+   ellipsis on a long theme name is wanted. */
+.plugin-topbar-menu .dd-item {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 10px;
+}
 /* This plugin has nothing to show; it only needs to be loaded. */
 .view-switch button.plugin-tab[title^="${PLUGIN_NAME}"] { display: none; }
 `;
@@ -85,9 +132,10 @@ const clientEntry = {
 		heading.textContent = "Top bar overflow fix";
 		const body = document.createElement("p");
 		body.textContent =
-			"This plugin only injects a stylesheet: the host clips its own top-bar overflow menu inside " +
-			".view-switch, so the menu can never be seen. If you are reading this, its tab failed to hide " +
-			"itself, which means the patch no longer matches the host markup.";
+			"This plugin only injects a stylesheet: older hosts clip the top-bar overflow menu inside " +
+			".view-switch so it can never be seen, and 0.87.x hosts clip and flatten the Theme, Language " +
+			"and Sound controls rendered inside the portalled menu. If you are reading this, its tab failed " +
+			"to hide itself, which means the patch no longer matches the host markup.";
 		const link = document.createElement("a");
 		link.href = ISSUE_URL;
 		link.target = "_blank";

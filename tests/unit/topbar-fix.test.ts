@@ -120,6 +120,48 @@ describe("topbar-fix stylesheet", () => {
 		expect(PATCH_CSS, "last child needs its right corners back").toMatch(/last-child[^}]*border-radius/);
 	});
 
+	it("releases the portalled menu's clip only while a nested panel is open", async () => {
+		const { PATCH_CSS } = await loadModule();
+		// The portal declares overflow-y:auto, so overflow-x computes to auto and
+		// clips the wider, right-anchored .dd-menu on its left overhang. Only
+		// `overflow: visible` lifts that, and it must be gated on .dd-menu being in
+		// the DOM so a long plain overflow menu keeps scrolling.
+		expect(PATCH_CSS).toMatch(/\.plugin-topbar-menu\.portal:has\(\.dd-menu\)\s*\{[^}]*overflow:\s*visible/);
+		expect(PATCH_CSS, "an ungated overflow:visible would kill scrolling for long menus").not.toMatch(
+			/\.plugin-topbar-menu\.portal\s*\{/,
+		);
+	});
+
+	it("restores the dropdown trigger the host's unscoped button rule flattens", async () => {
+		const { PATCH_CSS } = await loadModule();
+		// `.plugin-topbar-menu button` (0,1,1) beats `.chip` (0,1,0), so a host
+		// control moved into the menu loses its inline-flex row and its border.
+		const rule = /\.plugin-topbar-menu \.dropdown > button\s*\{([^}]*)\}/.exec(PATCH_CSS)?.[1] ?? "";
+		expect(rule).toMatch(/display:\s*inline-flex/);
+		expect(rule, "width:100% from the host rule has to go").toMatch(/width:\s*auto/);
+		expect(rule, "border:0 from the host rule has to go").toMatch(/border:\s*1px solid/);
+	});
+
+	it("restores the panel rows, not just the trigger", async () => {
+		const { PATCH_CSS } = await loadModule();
+		// The same host rule also outranks .dd-item, which misaligns the active
+		// item's checkmark. The ellipsis on a long theme name is wanted, so
+		// overflow/text-overflow are deliberately not reset.
+		const rule = /\.plugin-topbar-menu \.dd-item\s*\{([^}]*)\}/.exec(PATCH_CSS)?.[1] ?? "";
+		expect(rule).toMatch(/display:\s*flex/);
+		expect(rule).toMatch(/justify-content:\s*space-between/);
+		expect(rule).not.toMatch(/text-overflow/);
+	});
+
+	it("leaves real overflow menu entries alone", async () => {
+		const { PATCH_CSS } = await loadModule();
+		// Plugin entries are direct <button role="menuitem"> children of the portal.
+		// A bare descendant selector here would re-break exactly what the host rule
+		// breaks, in the other direction.
+		expect(PATCH_CSS).not.toMatch(/\.plugin-topbar-menu button\s*\{/);
+		expect(PATCH_CSS).not.toMatch(/\.plugin-topbar-menu\.portal button\s*\{/);
+	});
+
 	it("leaves the top bar's horizontal scrolling alone", async () => {
 		const { PATCH_CSS } = await loadModule();
 		// .topbar-actions is a second, latent clipper, but its overflow-x:auto is
