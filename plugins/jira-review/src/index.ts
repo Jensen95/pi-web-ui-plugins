@@ -2,6 +2,7 @@ import { createJiraApi, normalizeSiteUrl, type JiraIssue, type JiraSprint } from
 
 export const CONFIG_KEY = "jira-review.config";
 export const REVIEWS_KEY = "jira-review.reviews";
+export const RUNS_KEY = "jira-review.runs";
 export const TAG = "dogits-dans-le-nez";
 export const DEFAULT_READY_JQL = 'assignee IS EMPTY AND statusCategory = "To Do"';
 const ISSUE_KEY_RE = /^[A-Z][A-Z0-9_]*-\d+$/i;
@@ -133,6 +134,7 @@ function asReview(value: unknown): JiraReview {
 }
 
 type ReviewStore = Record<string, Record<string, JiraReview>>;
+type ReviewRuns = Record<string, Record<string, number>>;
 
 function reviewScope(config: JiraConfig | null): string {
 	return config?.siteUrl ?? "_unconfigured";
@@ -161,10 +163,20 @@ function publicState(
 	activeSprint: JiraSprint | null,
 	tickets: JiraTicket[],
 	reviews: Record<string, JiraReview>,
+	reviewing: Record<string, number>,
 	folders: string[],
 	error?: string,
 ): Record<string, unknown> {
-	return { configured: !!config, config, activeSprint, tickets, reviews, folders, ...(error ? { error } : {}) };
+	return {
+		configured: !!config,
+		config,
+		activeSprint,
+		tickets,
+		reviews,
+		reviewing,
+		folders,
+		...(error ? { error } : {}),
+	};
 }
 
 function errorText(error: unknown): string {
@@ -186,12 +198,14 @@ export default {
 		let folders: string[] = [];
 		let error: string | undefined;
 		let reviewStore = loadReviewStore(host.storage.get<unknown>(REVIEWS_KEY, {}));
+		let reviewRuns = (host.storage.get<ReviewRuns>(RUNS_KEY, {}) ?? {}) as ReviewRuns;
 		const currentReviews = (): Record<string, JiraReview> => reviewStore[reviewScope(config)] ?? {};
+		const currentRuns = (): Record<string, number> => reviewRuns[reviewScope(config)] ?? {};
 
 		const sendState = (clientId?: string): void => {
 			const payload = {
 				kind: "state",
-				state: publicState(config, activeSprint, tickets, currentReviews(), folders, error),
+				state: publicState(config, activeSprint, tickets, currentReviews(), currentRuns(), folders, error),
 			};
 			host.broadcast(payload);
 			if (clientId) host.sendTo(clientId, payload);
@@ -246,7 +260,10 @@ export default {
 			const normalizedKey = key.trim();
 			const scope = reviewScope(config);
 			reviewStore = { ...reviewStore, [scope]: { ...currentReviews(), [normalizedKey]: asReview(value) } };
+			const { [normalizedKey]: _completed, ...remainingRuns } = currentRuns();
+			reviewRuns = { ...reviewRuns, [scope]: remainingRuns };
 			host.storage.set(REVIEWS_KEY, reviewStore);
+			host.storage.set(RUNS_KEY, reviewRuns);
 			return { ok: true, key: normalizedKey };
 		};
 
@@ -266,6 +283,15 @@ export default {
 						config = next;
 						error = undefined;
 						sendResult(from, { ok: true, action: "save_config" });
+						sendState(from);
+						break;
+					}
+					case "start_review": {
+						const key = String(message.key ?? "").trim();
+						if (!ISSUE_KEY_RE.test(key)) throw new Error("Issue key is invalid");
+						const scope = reviewScope(config);
+						reviewRuns = { ...reviewRuns, [scope]: { ...currentRuns(), [key]: Date.now() } };
+						host.storage.set(RUNS_KEY, reviewRuns);
 						sendState(from);
 						break;
 					}

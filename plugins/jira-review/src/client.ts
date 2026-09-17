@@ -25,6 +25,7 @@ interface ReviewState {
 	folders?: string[];
 	tickets?: JiraTicket[];
 	reviews?: Record<string, JiraReview>;
+	reviewing?: Record<string, number>;
 	activeSprint?: { id: number; name: string; state: string } | null;
 	error?: string;
 	notice?: string;
@@ -379,6 +380,7 @@ export default {
 			root.className = "jira-review";
 			root.dataset.ui = "jira-dashboard";
 			const config = state.config ?? {};
+			const isReviewing = (key: string): boolean => reviewingTickets.has(key) || !!state.reviewing?.[key];
 			const header = makeElement(document, "header");
 			header.className = "jira-review__header";
 			header.append(
@@ -421,12 +423,16 @@ export default {
 			refresh.dataset.action = "refresh";
 			refresh.addEventListener("click", () => ctx.send({ action: "refresh" }));
 			const pendingCount = (state.tickets ?? []).filter(
-				(ticket) => !state.reviews?.[ticket.key] && !reviewingTickets.has(ticket.key),
+				(ticket) => !state.reviews?.[ticket.key] && !isReviewing(ticket.key),
 			).length;
 			const start = makeElement(
 				document,
 				"button",
-				pendingCount ? (reviewingTickets.size ? `Review remaining (${pendingCount})` : `Review all tickets (${pendingCount})`) : "Reviews in progress",
+				pendingCount
+					? reviewingTickets.size
+						? `Review remaining (${pendingCount})`
+						: `Review all tickets (${pendingCount})`
+					: "Reviews in progress",
 			) as HTMLButtonElement;
 			start.type = "button";
 			start.dataset.action = "start-reviews";
@@ -438,13 +444,16 @@ export default {
 					if (selected) overrides[key] = selected;
 				}
 				const ticketsToStart = (state.tickets ?? []).filter(
-					(ticket) => !state.reviews?.[ticket.key] && !reviewingTickets.has(ticket.key),
+					(ticket) => !state.reviews?.[ticket.key] && !isReviewing(ticket.key),
 				);
 				// The host creates a tab asynchronously; launching all of them in one event
 				// turn loses every request after the first.
 				selectedModel = modelInput.value.trim();
 				if (startTicketReviews(bridge, ticketsToStart, selectedFolders, overrides, 100, selectedModel)) {
-					for (const ticket of ticketsToStart) reviewingTickets.add(ticket.key);
+					for (const ticket of ticketsToStart) {
+						reviewingTickets.add(ticket.key);
+						ctx.send({ action: "start_review", key: ticket.key });
+					}
 					render();
 				}
 			});
@@ -510,11 +519,15 @@ export default {
 				folders.placeholder = "Comma-separated workspace folders";
 				folders.setAttribute("aria-label", `Review scope override for ${ticket.key}`);
 				ticketFolderInputs.set(ticket.key, folders);
-				const scopeHint = makeElement(document, "p", "Review scope override (optional): leave blank to use the shared scope.");
+				const scopeHint = makeElement(
+					document,
+					"p",
+					"Review scope override (optional): leave blank to use the shared scope.",
+				);
 				scopeHint.className = "jira-review__hint";
 				row.append(ticketHeader, meta, folders, scopeHint);
 				const review = state.reviews?.[ticket.key];
-				if (reviewingTickets.has(ticket.key)) {
+				if (isReviewing(ticket.key)) {
 					const status = makeElement(document, "p", "Review in progress");
 					status.className = "jira-review__reviewing";
 					row.append(status);
@@ -523,16 +536,21 @@ export default {
 					status.className = "jira-review__review-saved";
 					row.append(status, renderReview(document, ticket.key, review));
 				}
-				const startReview = makeElement(document, "button", review ? "Review again" : "Review ticket") as HTMLButtonElement;
+				const startReview = makeElement(
+					document,
+					"button",
+					review ? "Review again" : "Review ticket",
+				) as HTMLButtonElement;
 				startReview.type = "button";
 				startReview.dataset.action = "start-review";
 				startReview.dataset.key = ticket.key;
-				startReview.disabled = reviewingTickets.has(ticket.key);
+				startReview.disabled = isReviewing(ticket.key);
 				startReview.addEventListener("click", () => {
 					const foldersForTicket = parseFolderOverride(folders.value) ?? selectedFolders;
 					selectedModel = modelInput.value.trim();
 					if (startTicketReviews(bridge, [ticket], foldersForTicket, {}, 0, selectedModel)) {
 						reviewingTickets.add(ticket.key);
+						ctx.send({ action: "start_review", key: ticket.key });
 						render();
 					}
 				});
@@ -540,7 +558,7 @@ export default {
 				post.type = "button";
 				post.dataset.action = "post-review";
 				post.dataset.key = ticket.key;
-				post.disabled = reviewingTickets.has(ticket.key) || !review?.draftComment?.trim();
+				post.disabled = isReviewing(ticket.key) || !review?.draftComment?.trim();
 				post.addEventListener("click", () => {
 					if (review?.draftComment.trim())
 						ctx.send({ action: "post_review", key: ticket.key, comment: review.draftComment });

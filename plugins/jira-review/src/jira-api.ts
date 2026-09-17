@@ -52,6 +52,10 @@ function requireJql(value: unknown): string {
 }
 
 function requestError(status: number, statusText: string): Error {
+	if (status === 401)
+		return new Error(
+			"Jira request failed (401 Unauthorized): check the account email and use a classic unscoped API token",
+		);
 	const suffix = statusText && /^[\w .-]{1,80}$/.test(statusText) ? ` ${statusText}` : "";
 	return new Error(`Jira request failed (${status}${suffix})`);
 }
