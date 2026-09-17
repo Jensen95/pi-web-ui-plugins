@@ -5,6 +5,7 @@ import jiraClient, { buildReviewPrompt, startTicketReviews } from "../../plugins
 import jiraServer, {
 	CONFIG_KEY,
 	DEFAULT_READY_JQL,
+	FOLDER_SELECTIONS_KEY,
 	REVIEWS_KEY,
 	RUNS_KEY,
 	TAG,
@@ -224,6 +225,13 @@ describe("Jira review server", () => {
 	it("persists review launch state until a review is saved or stopped", async () => {
 		const host = createMockHost({ permissions: ["http", "tools", "fs"], storage: { [CONFIG_KEY]: CONFIG } });
 		const deactivate = jiraServer.activate(host);
+
+		await host.fs.write("src/.keep", "");
+		await host.emit.notifyCwd(host.cwd);
+		await new Promise((resolve) => setImmediate(resolve));
+		await host.emit.message({ action: "save_folders", folders: ["src", "missing"] }, "client-1");
+		expect(host.recorded.storage.get(FOLDER_SELECTIONS_KEY)).toMatchObject({ [host.cwd]: ["src"] });
+		expect(lastState(host)).toMatchObject({ selectedFolders: ["src"] });
 
 		await host.emit.message({ action: "start_review", key: "ABC-1" }, "client-1");
 		expect(host.recorded.storage.get(RUNS_KEY)).toMatchObject({ [CONFIG.siteUrl]: { "ABC-1": expect.any(Number) } });
@@ -583,6 +591,67 @@ describe("Jira review client", () => {
 		expect(descendants(container).some((element) => element.textContent.includes("Confirm the API contract."))).toBe(
 			true,
 		);
+		vi.useRealTimers();
+	});
+
+	it("filters visible tickets without changing the Jira result set", () => {
+		const { ctx, push } = createMockViewContext("jira-review");
+		const document = createFakeDocument();
+		const container = document.createElement("div");
+		jiraClient.mount?.(container as unknown as HTMLElement, ctx);
+		push({
+			kind: "state",
+			state: {
+				configured: true,
+				config: CONFIG,
+				tickets: [
+					{ key: "ABC-1", summary: "First ticket", description: "", status: "To Do" },
+					{ key: "ABC-2", summary: "Second ticket", description: "", status: "Blocked" },
+				],
+			},
+		});
+		const search = descendants(container).find((element) => element.dataset.field === "ticket-search");
+		search!.value = "blocked";
+		search!.dispatch("change");
+		const cards = descendants(container).filter(
+			(element) => element.dataset.key?.startsWith("ABC-") && element.tagName === "article",
+		);
+		expect(cards.map((card) => card.dataset.key)).toEqual(["ABC-2"]);
+	});
+
+	it("shows launch failures and lets a queued batch be cancelled", () => {
+		vi.useFakeTimers();
+		const startChat = vi.fn<(options: { prompt: string; newChat?: boolean }) => boolean>(() => false);
+		const { ctx, push } = createMockViewContext("jira-review");
+		const document = createFakeDocument();
+		document.defaultView.__piWebUiHost = { startChat };
+		const container = document.createElement("div");
+		jiraClient.mount?.(container as unknown as HTMLElement, ctx);
+		push({
+			kind: "state",
+			state: {
+				configured: true,
+				config: CONFIG,
+				tickets: [
+					{ key: "ABC-1", summary: "First", description: "", status: "To Do" },
+					{ key: "ABC-2", summary: "Second", description: "", status: "To Do" },
+				],
+			},
+		});
+		descendants(container)
+			.find((element) => element.dataset.action === "start-review")!
+			.click();
+		expect(descendants(container).some((element) => element.textContent.includes("Could not start"))).toBe(true);
+
+		startChat.mockClear();
+		descendants(container)
+			.find((element) => element.dataset.action === "start-reviews")!
+			.click();
+		descendants(container)
+			.find((element) => element.dataset.action === "cancel-queue")!
+			.click();
+		vi.advanceTimersByTime(1000);
+		expect(startChat).not.toHaveBeenCalled();
 		vi.useRealTimers();
 	});
 

@@ -3,6 +3,7 @@ import { createJiraApi, normalizeSiteUrl, type JiraIssue, type JiraSprint } from
 export const CONFIG_KEY = "jira-review.config";
 export const REVIEWS_KEY = "jira-review.reviews";
 export const RUNS_KEY = "jira-review.runs";
+export const FOLDER_SELECTIONS_KEY = "jira-review.folder-selections";
 export const TAG = "dogits-dans-le-nez";
 export const DEFAULT_READY_JQL = 'assignee IS EMPTY AND statusCategory = "To Do"';
 const ISSUE_KEY_RE = /^[A-Z][A-Z0-9_]*-\d+$/i;
@@ -168,6 +169,7 @@ function publicState(
 	reviewing: Record<string, number>,
 	workspaceCwd: string,
 	folders: string[],
+	selectedFolders: string[],
 	error?: string,
 ): Record<string, unknown> {
 	return {
@@ -179,6 +181,7 @@ function publicState(
 		reviewing,
 		workspaceCwd,
 		folders,
+		selectedFolders,
 		...(error ? { error } : {}),
 	};
 }
@@ -204,8 +207,13 @@ export default {
 		let error: string | undefined;
 		let reviewStore = loadReviewStore(host.storage.get<unknown>(REVIEWS_KEY, {}));
 		let reviewRuns = (host.storage.get<ReviewRuns>(RUNS_KEY, {}) ?? {}) as ReviewRuns;
+		let folderSelections = (host.storage.get<Record<string, string[]>>(FOLDER_SELECTIONS_KEY, {}) ?? {}) as Record<
+			string,
+			string[]
+		>;
 		const currentReviews = (): Record<string, JiraReview> => reviewStore[reviewScope(config)] ?? {};
 		const currentRuns = (): Record<string, number> => reviewRuns[reviewScope(config)] ?? {};
+		const currentFolderSelection = (): string[] => folderSelections[workspaceCwd] ?? [];
 
 		const sendState = (clientId?: string): void => {
 			const payload = {
@@ -218,6 +226,7 @@ export default {
 					currentRuns(),
 					workspaceCwd,
 					folders,
+					currentFolderSelection(),
 					error,
 				),
 			};
@@ -316,6 +325,17 @@ export default {
 						const { [key]: _cancelled, ...remainingRuns } = currentRuns();
 						reviewRuns = { ...reviewRuns, [scope]: remainingRuns };
 						host.storage.set(RUNS_KEY, reviewRuns);
+						sendState(from);
+						break;
+					}
+					case "save_folders": {
+						const selected = Array.isArray(message.folders)
+							? message.folders.filter(
+									(folder): folder is string => typeof folder === "string" && folders.includes(folder),
+								)
+							: [];
+						folderSelections = { ...folderSelections, [workspaceCwd]: [...new Set(selected)] };
+						host.storage.set(FOLDER_SELECTIONS_KEY, folderSelections);
 						sendState(from);
 						break;
 					}

@@ -2,9 +2,10 @@
 
 Shows the active sprint from Jira Cloud and filters it with a configurable ready-for-pickup JQL expression.
 
-For each ticket, select workspace folders for the agent to inspect. A review run opens one new pi chat per ticket,
-pinned to the currently selected pi-web-ui project. The plugin follows later project switches and refreshes its workspace
-folder choices. The agent saves a structured result through `jira_review_save`:
+For each ticket, select workspace folders for the agent to inspect. The shared folder selection is remembered separately
+for each workspace, and the ticket list can be filtered before starting a batch. A review run opens one new pi chat per
+ticket, pinned to the currently selected pi-web-ui project. The plugin follows later project switches and refreshes its
+workspace folder choices. The agent saves a structured result through `jira_review_save`:
 
 - ready for pickup;
 - difficulty: easy, medium, or hard;

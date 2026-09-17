@@ -28,6 +28,7 @@ interface ReviewState {
 	reviews?: Record<string, JiraReview>;
 	reviewing?: Record<string, number>;
 	workspaceCwd?: string;
+	selectedFolders?: string[];
 	activeSprint?: { id: number; name: string; state: string } | null;
 	error?: string;
 	notice?: string;
@@ -195,8 +196,9 @@ const VIEW_STYLE = `
 .jira-review__folders > h2 { flex-basis: 100%; margin: 0 0 2px; font-size: .9rem; color: var(--jr-muted); }
 .jira-review__folder { display: flex; gap: 7px; align-items: center; padding: 7px 10px; border: 1px solid var(--jr-border); border-radius: 999px; background: color-mix(in srgb, currentColor 2%, transparent); }
 .jira-review__tickets-panel { display: grid; gap: 14px; }
-.jira-review__tickets-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding-bottom: 8px; border-bottom: 1px solid var(--jr-border); }
+.jira-review__tickets-heading { display: grid; grid-template-columns: max-content minmax(220px, 1fr) max-content; align-items: center; gap: 12px; padding-bottom: 8px; border-bottom: 1px solid var(--jr-border); }
 .jira-review__tickets-heading h2 { margin: 0; font-size: 1.15rem; letter-spacing: -.015em; }
+.jira-review__tickets-heading input { width: 100%; min-height: 38px; padding: 8px 10px; border: 1px solid var(--jr-border); border-radius: 9px; background: transparent; color: inherit; font: inherit; }
 .jira-review__tickets-heading span { color: var(--jr-muted); font-size: .88rem; }
 .jira-review__tickets { display: grid; grid-template-columns: 1fr; gap: 12px; }
 .jira-review__ticket { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 11px 18px; align-content: start; padding: 18px 20px 18px 24px; border: 1px solid var(--jr-border); border-radius: 14px; background: color-mix(in srgb, currentColor 2%, transparent); box-shadow: 0 3px 14px color-mix(in srgb, black 7%, transparent); overflow: hidden; }
@@ -221,7 +223,7 @@ const VIEW_STYLE = `
 .jira-review__empty { padding: 36px; border: 1px dashed var(--jr-border); border-radius: 14px; text-align: center; }
 .jira-review__error { margin: 0; padding: 9px 11px; border-radius: 8px; color: #ae2a19; background: color-mix(in srgb, #ae2a19 10%, transparent); }
 @media (max-width: 900px) { .jira-review__toolbar { grid-template-columns: 1fr 1fr; align-items: stretch; } .jira-review__sprint { grid-column: 1 / -1; } }
-@media (max-width: 680px) { .jira-review { gap: 14px; } .jira-review__header { padding: 20px; border-radius: 14px; } .jira-review__settings, .jira-review__toolbar { grid-template-columns: 1fr; } .jira-review__field--wide { grid-column: auto; } .jira-review__ticket { grid-template-columns: 1fr; padding: 16px 16px 16px 20px; } .jira-review__reviewing, .jira-review__review-saved, .jira-review__ticket-actions { grid-column: 1; grid-row: auto; justify-content: flex-start; max-width: none; } .jira-review__ticket-actions button { flex: 1 1 160px; } }
+@media (max-width: 680px) { .jira-review { gap: 14px; } .jira-review__header { padding: 20px; border-radius: 14px; } .jira-review__settings, .jira-review__toolbar, .jira-review__tickets-heading { grid-template-columns: 1fr; } .jira-review__field--wide { grid-column: auto; } .jira-review__ticket { grid-template-columns: 1fr; padding: 16px 16px 16px 20px; } .jira-review__reviewing, .jira-review__review-saved, .jira-review__ticket-actions { grid-column: 1; grid-row: auto; justify-content: flex-start; max-width: none; } .jira-review__ticket-actions button { flex: 1 1 160px; } }
 `;
 
 type Page = "dashboard" | "settings";
@@ -284,6 +286,7 @@ export default {
 		let reviewErrors = new Map<string, string>();
 		let queueGeneration = 0;
 		let selectedFolders: string[] = [];
+		let ticketQuery = "";
 		let selectedModel = "";
 		let ticketFolderInputs = new Map<string, HTMLInputElement>();
 		const bridge =
@@ -403,6 +406,15 @@ export default {
 			root.className = "jira-review";
 			root.dataset.ui = "jira-dashboard";
 			const config = state.config ?? {};
+			const matchesTicket = (ticket: JiraTicket): boolean => {
+				const query = ticketQuery.trim().toLowerCase();
+				return (
+					!query ||
+					[ticket.key, ticket.summary, ticket.status, ticket.assignee ?? "", ...(ticket.labels ?? [])].some((value) =>
+						value.toLowerCase().includes(query),
+					)
+				);
+			};
 			const isReviewing = (key: string): boolean =>
 				queuedTickets.has(key) || reviewingTickets.has(key) || !!state.reviewing?.[key];
 			const header = makeElement(document, "header");
@@ -452,7 +464,7 @@ export default {
 			refresh.dataset.action = "refresh";
 			refresh.addEventListener("click", () => ctx.send({ action: "refresh" }));
 			const pendingCount = (state.tickets ?? []).filter(
-				(ticket) => !state.reviews?.[ticket.key] && !isReviewing(ticket.key),
+				(ticket) => matchesTicket(ticket) && !state.reviews?.[ticket.key] && !isReviewing(ticket.key),
 			).length;
 			const hasActiveReviews =
 				queuedTickets.size > 0 || reviewingTickets.size > 0 || Object.keys(state.reviewing ?? {}).length > 0;
@@ -471,7 +483,7 @@ export default {
 					if (selected) overrides[key] = selected;
 				}
 				const ticketsToStart = (state.tickets ?? []).filter(
-					(ticket) => !state.reviews?.[ticket.key] && !isReviewing(ticket.key),
+					(ticket) => matchesTicket(ticket) && !state.reviews?.[ticket.key] && !isReviewing(ticket.key),
 				);
 				// The host creates a tab asynchronously; launching all of them in one event
 				// turn loses every request after the first.
@@ -531,6 +543,7 @@ export default {
 						const input = child.children[0] as HTMLInputElement | undefined;
 						return input?.checked ? [input.value] : [];
 					});
+					ctx.send({ action: "save_folders", folders: selectedFolders });
 				});
 				label.append(checkbox, makeElement(document, "span", folder));
 				folderGrid.append(label);
@@ -542,20 +555,33 @@ export default {
 			ticketsPanel.className = "jira-review__tickets-panel";
 			const ticketsHeading = makeElement(document, "div");
 			ticketsHeading.className = "jira-review__tickets-heading";
-			ticketsHeading.append(
-				makeElement(document, "h2", "Tickets to review"),
-				makeElement(document, "span", `${state.tickets?.length ?? 0} tickets`),
+			const ticketCount = makeElement(
+				document,
+				"span",
+				`${(state.tickets ?? []).filter(matchesTicket).length} tickets`,
 			);
+			const search = field(document, "ticket-search", ticketQuery, "search");
+			search.placeholder = "Filter by key, summary, status or assignee";
+			search.setAttribute("aria-label", "Filter Jira tickets");
+			search.addEventListener("change", () => {
+				ticketQuery = search.value;
+				render();
+			});
+			ticketsHeading.append(makeElement(document, "h2", "Tickets to review"), search, ticketCount);
 			ticketsPanel.append(ticketsHeading);
 			const ticketGrid = makeElement(document, "div");
 			ticketGrid.className = "jira-review__tickets";
 			ticketFolderInputs = new Map();
-			if (!(state.tickets ?? []).length) {
-				const empty = makeElement(document, "p", "No tickets match the configured JQL in the active sprint.");
+			if (!(state.tickets ?? []).filter(matchesTicket).length) {
+				const empty = makeElement(
+					document,
+					"p",
+					ticketQuery ? "No tickets match this filter." : "No tickets match the configured JQL in the active sprint.",
+				);
 				empty.className = "jira-review__empty";
 				ticketGrid.append(empty);
 			}
-			for (const ticket of state.tickets ?? []) {
+			for (const ticket of (state.tickets ?? []).filter(matchesTicket)) {
 				const row = makeElement(document, "article");
 				row.className = "jira-review__ticket";
 				row.dataset.key = ticket.key;
@@ -730,6 +756,7 @@ export default {
 			};
 			if (message.kind === "state") {
 				state = message.state ?? {};
+				selectedFolders = state.selectedFolders ?? selectedFolders;
 				for (const key of reviewingTickets) {
 					if (!state.reviewing?.[key] && !queuedTickets.has(key)) reviewingTickets.delete(key);
 				}
