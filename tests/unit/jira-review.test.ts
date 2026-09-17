@@ -395,6 +395,23 @@ describe("Jira review client", () => {
 		expect(descendants(container).some((element) => element.dataset.ui === "jira-settings")).toBe(false);
 	});
 
+	it("imports the site URL and board ID from a Jira board link", () => {
+		const { ctx } = createMockViewContext("jira-review");
+		const document = createFakeDocument();
+		const container = settingsContainer(document);
+		jiraClient.mount?.(container as unknown as HTMLElement, ctx);
+
+		const link = descendants(container).find((element) => element.dataset.field === "boardUrl");
+		const importButton = descendants(container).find((element) => element.dataset.action === "import-board-url");
+		link!.value = "https://example.atlassian.net/jira/software/c/projects/ABC/boards/42/backlog";
+		importButton!.click();
+
+		expect(descendants(container).find((element) => element.dataset.field === "siteUrl")?.value).toBe(
+			"https://example.atlassian.net",
+		);
+		expect(descendants(container).find((element) => element.dataset.field === "boardId")?.value).toBe("42");
+	});
+
 	it("clears the form once the server confirms the save", () => {
 		const { ctx, push } = createMockViewContext("jira-review");
 		const document = createFakeDocument();
@@ -425,10 +442,20 @@ describe("Jira review client", () => {
 		jiraClient.mount?.(container as unknown as HTMLElement, ctx);
 		push({ kind: "state", state: { configured: true, config: CONFIG } });
 
+		const form = descendants(container).find((element) => element.dataset.ui === "jira-settings");
+		const values = { ...CONFIG, apiToken: TOKEN, boardUrl: "" };
+		for (const input of descendants(form!).filter((element) => element.dataset.field)) {
+			input.value = values[input.dataset.field as keyof typeof values];
+		}
+		form!.dispatch("submit", { preventDefault: vi.fn() });
 		push({ kind: "result", ok: false, action: "save_config", error: "Jira API token is required" });
 
 		const fields = descendants(container).filter((element) => element.dataset.field);
-		expect(fields.find((element) => element.dataset.field === "siteUrl")?.value).toBe(CONFIG.siteUrl);
+		for (const input of fields) {
+			expect(input.value, `${input.dataset.field} must be kept after a failed save`).toBe(
+				values[input.dataset.field as keyof typeof values],
+			);
+		}
 		const text = descendants(container)
 			.map((element) => element.textContent)
 			.join(" ");

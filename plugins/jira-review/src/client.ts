@@ -116,6 +116,16 @@ function parseFolderOverride(value: string): string[] | undefined {
 	return folders.length ? folders : undefined;
 }
 
+function parseBoardUrl(value: string): { siteUrl: string; boardId: string } | undefined {
+	try {
+		const url = new URL(value.trim());
+		const boardId = url.pathname.match(/\/boards\/(\d+)(?:\/|$)/)?.[1];
+		return boardId ? { siteUrl: url.origin, boardId } : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
 const VIEW_STYLE = `
 .jira-review { display: grid; gap: 16px; width: min(100%, 1200px); }
 .jira-review__header { display: grid; gap: 5px; }
@@ -209,6 +219,7 @@ export default {
 		 * back to editing a saved value.
 		 */
 		let savedAndCleared = false;
+		let submittedSettings: Record<string, string> | undefined;
 		let selectedFolders: string[] = [];
 		let ticketFolderInputs = new Map<string, HTMLInputElement>();
 		const bridge =
@@ -238,42 +249,73 @@ export default {
 			// storage and secret store, so leaving them on screen only re-exposes
 			// credentials nobody needs to read back.
 			const config = savedAndCleared ? {} : (state.config ?? {});
-			appendSettingsField(document, form, fields, "siteUrl", "Jira Cloud site URL", config.siteUrl ?? "");
-			appendSettingsField(document, form, fields, "email", "Account email", config.email ?? "");
-			appendSettingsField(document, form, fields, "apiToken", "API token", "", "password");
+			const value = (name: string, fallback = ""): string => submittedSettings?.[name] ?? fallback;
+			appendSettingsField(
+				document,
+				form,
+				fields,
+				"boardUrl",
+				"Import from Jira board URL",
+				value("boardUrl"),
+				"text",
+				true,
+			);
+			const boardUrl = fields.get("boardUrl");
+			if (boardUrl && "placeholder" in boardUrl) boardUrl.placeholder = "https://your-site.atlassian.net/.../boards/42";
+			appendSettingsField(
+				document,
+				form,
+				fields,
+				"siteUrl",
+				"Jira Cloud site URL",
+				value("siteUrl", config.siteUrl ?? ""),
+			);
+			appendSettingsField(document, form, fields, "email", "Account email", value("email", config.email ?? ""));
+			appendSettingsField(document, form, fields, "apiToken", "API token", value("apiToken"), "password");
 			const token = fields.get("apiToken");
 			if (token && "placeholder" in token) token.placeholder = "Leave blank to keep the saved token";
-			appendSettingsField(document, form, fields, "boardId", "Board ID", config.boardId ?? "");
+			appendSettingsField(document, form, fields, "boardId", "Board ID", value("boardId", config.boardId ?? ""));
 			appendSettingsField(
 				document,
 				form,
 				fields,
 				"readyJql",
 				"Ready-ticket JQL",
-				savedAndCleared ? "" : config.readyJql || DEFAULT_READY_JQL,
+				value("readyJql", savedAndCleared ? "" : config.readyJql || DEFAULT_READY_JQL),
 				"textarea",
 				true,
 			);
 
 			const actions = makeElement(document, "div");
 			actions.className = "jira-review__actions jira-review__field--wide";
+			const importBoard = makeElement(document, "button", "Import board URL") as HTMLButtonElement;
+			importBoard.type = "button";
+			importBoard.dataset.action = "import-board-url";
+			importBoard.addEventListener("click", () => {
+				const imported = parseBoardUrl(fields.get("boardUrl")?.value ?? "");
+				if (!imported) return;
+				const siteUrl = fields.get("siteUrl");
+				const boardId = fields.get("boardId");
+				if (siteUrl) siteUrl.value = imported.siteUrl;
+				if (boardId) boardId.value = imported.boardId;
+			});
 			const save = makeElement(document, "button", "Save settings") as HTMLButtonElement;
 			save.type = "submit";
 			save.dataset.action = "save-settings";
-			actions.append(save);
+			actions.append(importBoard, save);
 			form.append(actions);
 			form.addEventListener("submit", (event) => {
 				event.preventDefault();
-				const value = (name: string): string => fields.get(name)?.value ?? "";
+				submittedSettings = Object.fromEntries([...fields].map(([name, input]) => [name, input.value]));
 				ctx.send({
 					action: "save_config",
 					config: {
-						siteUrl: value("siteUrl"),
-						email: value("email"),
-						boardId: value("boardId"),
-						readyJql: value("readyJql"),
+						siteUrl: submittedSettings.siteUrl,
+						email: submittedSettings.email,
+						boardId: submittedSettings.boardId,
+						readyJql: submittedSettings.readyJql,
 					},
-					token: value("apiToken"),
+					token: submittedSettings.apiToken,
 				});
 				// Not cleared here: only the server's ok:true result means it landed.
 			});
@@ -447,6 +489,7 @@ export default {
 				// The one unambiguous "your save landed" signal: it is sent to the saving
 				// client only, while a state broadcast also fires on refresh and attach.
 				savedAndCleared = true;
+				submittedSettings = undefined;
 				state = { ...state, error: undefined };
 				render();
 			}
