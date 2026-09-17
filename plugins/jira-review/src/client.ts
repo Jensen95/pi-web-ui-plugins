@@ -52,18 +52,24 @@ export function startTicketReviews(
 	tickets: readonly JiraTicket[],
 	folders: readonly string[] = [],
 	ticketFolders: Record<string, readonly string[]> = {},
+	delayMs = 0,
 ): number {
 	if (!host || typeof host.startChat !== "function") return 0;
 	let started = 0;
-	for (const ticket of tickets) {
+	const start = (ticket: JiraTicket): void => {
 		try {
 			const selected = ticketFolders[ticket.key] ?? folders;
-			if (host.startChat({ prompt: buildReviewPrompt(ticket, selected), newChat: true }) !== false) started += 1;
+			if (host.startChat!({ prompt: buildReviewPrompt(ticket, selected), newChat: true }) !== false) started += 1;
 		} catch {
 			// A missing browser bridge should not break the Jira view.
 		}
+	};
+	if (!delayMs) {
+		for (const ticket of tickets) start(ticket);
+		return started;
 	}
-	return started;
+	for (const [index, ticket] of tickets.entries()) setTimeout(() => start(ticket), index * delayMs);
+	return tickets.length;
 }
 
 function makeElement(document: Document, tag: string, text?: string): HTMLElement {
@@ -127,30 +133,40 @@ function parseBoardUrl(value: string): { siteUrl: string; boardId: string } | un
 }
 
 const VIEW_STYLE = `
-.jira-review { display: grid; gap: 16px; width: min(100%, 1200px); }
+.jira-review { display: grid; gap: 18px; width: min(100%, 1200px); }
+.jira-review__header, .jira-review__toolbar, .jira-review__tickets-panel, .jira-review__folders { padding: 18px; border: 1px solid color-mix(in srgb, currentColor 15%, transparent); border-radius: 14px; background: color-mix(in srgb, currentColor 4%, transparent); }
 .jira-review__header { display: grid; gap: 5px; }
-.jira-review__header h1 { margin: 0; font-size: 1.35rem; }
+.jira-review__header h1 { margin: 0; font-size: 1.5rem; letter-spacing: -.02em; }
 .jira-review__header p { margin: 0; opacity: .72; }
-.jira-review__toolbar { display: grid; grid-template-columns: 1fr repeat(3, max-content); gap: 8px; align-items: center; }
+.jira-review__toolbar { display: grid; grid-template-columns: 1fr repeat(2, max-content); gap: 10px; align-items: center; }
 .jira-review__sprint { display: grid; gap: 3px; }
-.jira-review__sprint strong { font-size: 1.05rem; }
+.jira-review__sprint span { font-size: .8rem; font-weight: 700; letter-spacing: .06em; opacity: .65; text-transform: uppercase; }
+.jira-review__sprint strong { font-size: 1.1rem; }
+.jira-review button { padding: 8px 12px; border: 1px solid color-mix(in srgb, currentColor 28%, transparent); border-radius: 8px; background: transparent; color: inherit; font: inherit; font-weight: 650; cursor: pointer; }
+.jira-review button:hover:not(:disabled) { background: color-mix(in srgb, currentColor 9%, transparent); }
+.jira-review button:disabled { cursor: not-allowed; opacity: .48; }
 .jira-review__settings { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .jira-review__field { display: grid; gap: 6px; }
 .jira-review__field--wide { grid-column: 1 / -1; }
 .jira-review__field span { font-weight: 600; font-size: .9em; }
-.jira-review__field input, .jira-review__field textarea { box-sizing: border-box; width: 100%; padding: 8px; font: inherit; }
+.jira-review__field input, .jira-review__field textarea, .jira-review__ticket-folders { box-sizing: border-box; width: 100%; padding: 9px 10px; border: 1px solid color-mix(in srgb, currentColor 24%, transparent); border-radius: 8px; background: transparent; color: inherit; font: inherit; }
 .jira-review__field textarea { min-height: 88px; resize: vertical; }
-.jira-review__actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-.jira-review__folders { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 6px; }
+.jira-review__actions, .jira-review__ticket-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.jira-review__folders { display: grid; gap: 12px; }
 .jira-review__folder { display: flex; gap: 7px; align-items: center; }
-.jira-review__tickets { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-.jira-review__ticket { display: grid; gap: 10px; align-content: start; padding: 14px; border: 1px solid color-mix(in srgb, currentColor 22%, transparent); border-radius: 10px; }
-.jira-review__ticket-header { display: grid; grid-template-columns: max-content 1fr; gap: 5px 9px; }
-.jira-review__ticket-key { font-weight: 700; }
+.jira-review__tickets-panel { display: grid; gap: 14px; }
+.jira-review__tickets-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.jira-review__tickets-heading h2 { margin: 0; font-size: 1.05rem; }
+.jira-review__tickets-heading span { color: color-mix(in srgb, currentColor 72%, transparent); font-size: .9rem; }
+.jira-review__tickets { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 12px; }
+.jira-review__ticket { display: grid; gap: 12px; align-content: start; padding: 16px; border: 1px solid color-mix(in srgb, currentColor 18%, transparent); border-radius: 12px; background: color-mix(in srgb, currentColor 3%, transparent); }
+.jira-review__ticket-header { display: grid; grid-template-columns: max-content 1fr; gap: 6px 9px; }
+.jira-review__ticket-key { font-weight: 750; }
 .jira-review__ticket-summary { grid-column: 1 / -1; font-size: 1.05rem; font-weight: 650; }
 .jira-review__ticket-meta { display: flex; flex-wrap: wrap; gap: 8px; opacity: .72; font-size: .9em; }
-.jira-review__ticket-folders { width: 100%; box-sizing: border-box; padding: 7px; font: inherit; }
-.jira-review__saved { display: grid; gap: 4px; padding: 10px; border-radius: 7px; background: color-mix(in srgb, currentColor 8%, transparent); }
+.jira-review__reviewing, .jira-review__review-saved { width: fit-content; margin: 0; padding: 4px 8px; border-radius: 999px; font-size: .82rem; font-weight: 700; background: color-mix(in srgb, #d97706 18%, transparent); color: #a85a00; }
+.jira-review__review-saved { background: color-mix(in srgb, #15803d 18%, transparent); color: #157536; }
+.jira-review__saved { display: grid; gap: 4px; padding: 11px; border-radius: 8px; background: color-mix(in srgb, currentColor 7%, transparent); }
 .jira-review__saved p { margin: 0; }
 .jira-review__error { margin: 0; color: #b42318; }
 @media (max-width: 900px) {
@@ -220,6 +236,7 @@ export default {
 		 */
 		let savedAndCleared = false;
 		let submittedSettings: Record<string, string> | undefined;
+		let reviewingTickets = new Set<string>();
 		let selectedFolders: string[] = [];
 		let ticketFolderInputs = new Map<string, HTMLInputElement>();
 		const bridge =
@@ -362,7 +379,15 @@ export default {
 					const selected = parseFolderOverride(input.value);
 					if (selected) overrides[key] = selected;
 				}
-				startTicketReviews(bridge, state.tickets ?? [], selectedFolders, overrides);
+				const ticketsToStart = (state.tickets ?? []).filter(
+					(ticket) => !state.reviews?.[ticket.key] && !reviewingTickets.has(ticket.key),
+				);
+				// The host creates a tab asynchronously; launching all of them in one event
+				// turn loses every request after the first.
+				if (startTicketReviews(bridge, ticketsToStart, selectedFolders, overrides, 100)) {
+					for (const ticket of ticketsToStart) reviewingTickets.add(ticket.key);
+					render();
+				}
 			});
 			toolbar.append(sprint, refresh, start);
 
@@ -390,7 +415,14 @@ export default {
 
 			const ticketsPanel = makeElement(document, "section");
 			ticketsPanel.dataset.ui = "tickets";
-			ticketsPanel.append(makeElement(document, "h2", `Ready tickets (${state.tickets?.length ?? 0})`));
+			ticketsPanel.className = "jira-review__tickets-panel";
+			const ticketsHeading = makeElement(document, "div");
+			ticketsHeading.className = "jira-review__tickets-heading";
+			ticketsHeading.append(
+				makeElement(document, "h2", "Ready tickets"),
+				makeElement(document, "span", `${state.tickets?.length ?? 0} ready for review`),
+			);
+			ticketsPanel.append(ticketsHeading);
 			const ticketGrid = makeElement(document, "div");
 			ticketGrid.className = "jira-review__tickets";
 			ticketFolderInputs = new Map();
@@ -415,7 +447,27 @@ export default {
 				ticketFolderInputs.set(ticket.key, folders);
 				row.append(ticketHeader, meta, folders);
 				const review = state.reviews?.[ticket.key];
-				if (review) row.append(renderReview(document, ticket.key, review));
+				if (reviewingTickets.has(ticket.key)) {
+					const status = makeElement(document, "p", "Review in progress");
+					status.className = "jira-review__reviewing";
+					row.append(status);
+				} else if (review) {
+					const status = makeElement(document, "p", "Review saved");
+					status.className = "jira-review__review-saved";
+					row.append(status, renderReview(document, ticket.key, review));
+				}
+				const startReview = makeElement(document, "button", "Review ticket") as HTMLButtonElement;
+				startReview.type = "button";
+				startReview.dataset.action = "start-review";
+				startReview.dataset.key = ticket.key;
+				startReview.disabled = reviewingTickets.has(ticket.key);
+				startReview.addEventListener("click", () => {
+					const foldersForTicket = parseFolderOverride(folders.value) ?? selectedFolders;
+					if (startTicketReviews(bridge, [ticket], foldersForTicket)) {
+						reviewingTickets.add(ticket.key);
+						render();
+					}
+				});
 				const post = makeElement(document, "button", "Post review") as HTMLButtonElement;
 				post.type = "button";
 				post.dataset.action = "post-review";
@@ -425,7 +477,10 @@ export default {
 					if (review?.draftComment.trim())
 						ctx.send({ action: "post_review", key: ticket.key, comment: review.draftComment });
 				});
-				row.append(post);
+				const ticketActions = makeElement(document, "div");
+				ticketActions.className = "jira-review__ticket-actions";
+				ticketActions.append(startReview, post);
+				row.append(ticketActions);
 				ticketGrid.append(row);
 			}
 			ticketsPanel.append(ticketGrid);
@@ -481,6 +536,7 @@ export default {
 			};
 			if (message.kind === "state") {
 				state = message.state ?? {};
+				for (const key of Object.keys(state.reviews ?? {})) reviewingTickets.delete(key);
 				render();
 			} else if (message.kind === "result" && typeof message.error === "string") {
 				state = { ...state, error: message.error };

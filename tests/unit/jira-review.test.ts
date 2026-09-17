@@ -376,7 +376,7 @@ describe("Jira review client", () => {
 		expect(descendants(container).some((element) => element.dataset.ui === "jira-settings")).toBe(false);
 		expect(descendants(container).some((element) => element.dataset.action === "settings")).toBe(false);
 		const style = descendants(container).find((element) => element.tagName === "style")?.textContent ?? "";
-		expect(style).toContain(".jira-review__tickets { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));");
+		expect(style).toContain(".jira-review__tickets { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));");
 		expect(style).toContain(".jira-review__settings { display: grid;");
 	});
 
@@ -506,6 +506,7 @@ describe("Jira review client", () => {
 		});
 		expect(sent).toContainEqual({ action: "get_state" });
 		expect(descendants(container).some((element) => element.dataset.action === "start-reviews")).toBe(true);
+		expect(descendants(container).some((element) => element.dataset.action === "start-review")).toBe(true);
 		expect(descendants(container).some((element) => element.dataset.action === "post-review")).toBe(true);
 		cleanup?.();
 		expect(container.children).toEqual([]);
@@ -541,18 +542,49 @@ describe("Jira review client", () => {
 		);
 		expect(override).toBeDefined();
 		override!.value = "docs";
+		vi.useFakeTimers();
 		descendants(container)
 			.find((element) => element.dataset.action === "start-reviews")!
 			.click();
-		expect(startChat).toHaveBeenCalledTimes(2);
-		expect(startChat.mock.calls[0]![0].prompt).toContain("src");
-		expect(startChat.mock.calls[1]![0].prompt).toContain("docs");
+		expect(descendants(container).some((element) => element.textContent === "Review in progress")).toBe(true);
+		vi.advanceTimersByTime(100);
+		expect(startChat).toHaveBeenCalledTimes(1);
+		expect(startChat.mock.calls[0]![0].prompt).toContain("docs");
 		const reviewPanel = descendants(container).find((element) => element.dataset.review === "ABC-1");
 		expect(reviewPanel).toBeDefined();
 		expect(descendants(reviewPanel!).some((element) => element.textContent.includes("Confidence: medium"))).toBe(true);
 		expect(descendants(container).some((element) => element.textContent.includes("Confirm the API contract."))).toBe(
 			true,
 		);
+		vi.useRealTimers();
+	});
+
+	it("starts one ticket on demand and marks it as in progress", () => {
+		const startChat = vi.fn<(options: { prompt: string; newChat?: boolean }) => boolean>(() => true);
+		const { ctx, push } = createMockViewContext("jira-review");
+		const document = createFakeDocument();
+		document.defaultView.__piWebUiHost = { startChat };
+		const container = document.createElement("div");
+		jiraClient.mount?.(container as unknown as HTMLElement, ctx);
+		push({
+			kind: "state",
+			state: {
+				configured: true,
+				config: CONFIG,
+				folders: ["src"],
+				tickets: [{ key: "ABC-1", summary: "First", description: "One", status: "To Do" }],
+				reviews: {},
+			},
+		});
+
+		descendants(container)
+			.find((element) => element.dataset.action === "start-review")!
+			.click();
+
+		expect(startChat).toHaveBeenCalledTimes(1);
+		expect(startChat.mock.calls[0]![0].prompt).toContain("ABC-1");
+		expect(descendants(container).some((element) => element.textContent === "Review in progress")).toBe(true);
+		expect(descendants(container).find((element) => element.dataset.action === "start-review")?.disabled).toBe(true);
 	});
 });
 
