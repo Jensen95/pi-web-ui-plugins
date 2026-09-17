@@ -376,9 +376,7 @@ describe("Jira review client", () => {
 		expect(descendants(container).some((element) => element.dataset.ui === "jira-settings")).toBe(false);
 		expect(descendants(container).some((element) => element.dataset.action === "settings")).toBe(false);
 		const style = descendants(container).find((element) => element.tagName === "style")?.textContent ?? "";
-		expect(style).toContain(
-			".jira-review__tickets { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));",
-		);
+		expect(style).toContain(".jira-review__tickets { display: grid; grid-template-columns: 1fr;");
 		expect(style).toContain(".jira-review__settings { display: grid;");
 	});
 

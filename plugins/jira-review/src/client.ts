@@ -67,7 +67,10 @@ export function startTicketReviews(
 	const start = (ticket: JiraTicket): void => {
 		try {
 			const selected = ticketFolders[ticket.key] ?? folders;
-			if (host.startChat!({ prompt: buildReviewPrompt(ticket, selected), newChat: true, ...(model ? { model } : {}) }) !== false)
+			if (
+				host.startChat!({ prompt: buildReviewPrompt(ticket, selected), newChat: true, ...(model ? { model } : {}) }) !==
+				false
+			)
 				started += 1;
 		} catch {
 			// A missing browser bridge should not break the Jira view.
@@ -111,15 +114,24 @@ function renderReview(document: Document, key: string, review: JiraReview): HTML
 	panel.dataset.review = key;
 	panel.dataset.confidence = review.confidence;
 	panel.className = "jira-review__saved";
-	panel.append(
-		makeElement(document, "p", `Ready: ${review.ready ? "yes" : "no"}`),
-		makeElement(document, "p", `Difficulty: ${review.difficulty}`),
-		makeElement(document, "p", `Confidence: ${review.confidence}`),
+	const summary = makeElement(document, "div");
+	summary.className = "jira-review__review-summary";
+	summary.append(
+		makeElement(document, "span", `Implementation ready: ${review.ready ? "Yes" : "No"}`),
+		makeElement(document, "span", `Difficulty: ${review.difficulty}`),
+		makeElement(document, "span", `Confidence: ${review.confidence}`),
+	);
+	const details = makeElement(document, "details");
+	details.className = "jira-review__review-details";
+	details.append(
+		makeElement(document, "summary", "Review details"),
 		makeElement(document, "p", `Rationale: ${review.rationale}`),
 		makeElement(document, "p", `Missing information: ${textList(review.missingInfo)}`),
 		makeElement(document, "p", `Implementation plan: ${textList(review.implementationPlan)}`),
 		makeElement(document, "p", `Confidence suggestions: ${textList(review.confidenceSuggestions)}`),
+		makeElement(document, "p", `Draft Jira comment: ${review.draftComment || "None"}`),
 	);
+	panel.append(summary, details);
 	return panel;
 }
 
@@ -169,7 +181,7 @@ const VIEW_STYLE = `
 .jira-review__tickets-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
 .jira-review__tickets-heading h2 { margin: 0; font-size: 1.05rem; }
 .jira-review__tickets-heading span { color: color-mix(in srgb, currentColor 72%, transparent); font-size: .9rem; }
-.jira-review__tickets { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 12px; }
+.jira-review__tickets { display: grid; grid-template-columns: 1fr; gap: 12px; }
 .jira-review__ticket { display: grid; gap: 12px; align-content: start; padding: 16px; border: 1px solid color-mix(in srgb, currentColor 18%, transparent); border-radius: 12px; background: color-mix(in srgb, currentColor 3%, transparent); }
 .jira-review__ticket-header { display: grid; grid-template-columns: max-content 1fr; gap: 6px 9px; }
 .jira-review__ticket-key { font-weight: 750; }
@@ -177,8 +189,12 @@ const VIEW_STYLE = `
 .jira-review__ticket-meta { display: flex; flex-wrap: wrap; gap: 8px; opacity: .72; font-size: .9em; }
 .jira-review__reviewing, .jira-review__review-saved { width: fit-content; margin: 0; padding: 4px 8px; border-radius: 999px; font-size: .82rem; font-weight: 700; background: color-mix(in srgb, #d97706 18%, transparent); color: #a85a00; }
 .jira-review__review-saved { background: color-mix(in srgb, #15803d 18%, transparent); color: #157536; }
-.jira-review__saved { display: grid; gap: 4px; padding: 11px; border-radius: 8px; background: color-mix(in srgb, currentColor 7%, transparent); }
-.jira-review__saved p { margin: 0; }
+.jira-review__saved { display: grid; gap: 9px; padding: 11px; border-radius: 8px; background: color-mix(in srgb, currentColor 7%, transparent); }
+.jira-review__review-summary { display: flex; flex-wrap: wrap; gap: 8px 14px; font-weight: 650; }
+.jira-review__review-details { display: grid; gap: 7px; }
+.jira-review__review-details summary { cursor: pointer; font-weight: 650; }
+.jira-review__review-details p { margin: 0; max-width: 78ch; }
+.jira-review__hint, .jira-review__empty { margin: 0; opacity: .72; font-size: .9rem; }
 .jira-review__error { margin: 0; color: #b42318; }
 @media (max-width: 900px) {
   .jira-review__toolbar { grid-template-columns: 1fr 1fr; }
@@ -404,9 +420,17 @@ export default {
 			refresh.type = "button";
 			refresh.dataset.action = "refresh";
 			refresh.addEventListener("click", () => ctx.send({ action: "refresh" }));
-			const start = makeElement(document, "button", "Start reviews") as HTMLButtonElement;
+			const pendingCount = (state.tickets ?? []).filter(
+				(ticket) => !state.reviews?.[ticket.key] && !reviewingTickets.has(ticket.key),
+			).length;
+			const start = makeElement(
+				document,
+				"button",
+				pendingCount ? (reviewingTickets.size ? `Review remaining (${pendingCount})` : `Review all tickets (${pendingCount})`) : "Reviews in progress",
+			) as HTMLButtonElement;
 			start.type = "button";
 			start.dataset.action = "start-reviews";
+			start.disabled = pendingCount === 0;
 			start.addEventListener("click", () => {
 				const overrides: Record<string, string[]> = {};
 				for (const [key, input] of ticketFolderInputs) {
@@ -454,13 +478,18 @@ export default {
 			const ticketsHeading = makeElement(document, "div");
 			ticketsHeading.className = "jira-review__tickets-heading";
 			ticketsHeading.append(
-				makeElement(document, "h2", "Ready tickets"),
-				makeElement(document, "span", `${state.tickets?.length ?? 0} ready for review`),
+				makeElement(document, "h2", "Tickets to review"),
+				makeElement(document, "span", `${state.tickets?.length ?? 0} tickets`),
 			);
 			ticketsPanel.append(ticketsHeading);
 			const ticketGrid = makeElement(document, "div");
 			ticketGrid.className = "jira-review__tickets";
 			ticketFolderInputs = new Map();
+			if (!(state.tickets ?? []).length) {
+				const empty = makeElement(document, "p", "No tickets match the configured JQL in the active sprint.");
+				empty.className = "jira-review__empty";
+				ticketGrid.append(empty);
+			}
 			for (const ticket of state.tickets ?? []) {
 				const row = makeElement(document, "article");
 				row.className = "jira-review__ticket";
@@ -478,9 +507,12 @@ export default {
 				const folders = field(document, "ticket-folders");
 				folders.className = "jira-review__ticket-folders";
 				folders.dataset.key = ticket.key;
-				folders.placeholder = "Optional folder override, comma-separated";
+				folders.placeholder = "Comma-separated workspace folders";
+				folders.setAttribute("aria-label", `Review scope override for ${ticket.key}`);
 				ticketFolderInputs.set(ticket.key, folders);
-				row.append(ticketHeader, meta, folders);
+				const scopeHint = makeElement(document, "p", "Review scope override (optional): leave blank to use the shared scope.");
+				scopeHint.className = "jira-review__hint";
+				row.append(ticketHeader, meta, folders, scopeHint);
 				const review = state.reviews?.[ticket.key];
 				if (reviewingTickets.has(ticket.key)) {
 					const status = makeElement(document, "p", "Review in progress");
@@ -491,7 +523,7 @@ export default {
 					status.className = "jira-review__review-saved";
 					row.append(status, renderReview(document, ticket.key, review));
 				}
-				const startReview = makeElement(document, "button", "Review ticket") as HTMLButtonElement;
+				const startReview = makeElement(document, "button", review ? "Review again" : "Review ticket") as HTMLButtonElement;
 				startReview.type = "button";
 				startReview.dataset.action = "start-review";
 				startReview.dataset.key = ticket.key;
@@ -508,7 +540,7 @@ export default {
 				post.type = "button";
 				post.dataset.action = "post-review";
 				post.dataset.key = ticket.key;
-				post.disabled = !review?.draftComment?.trim();
+				post.disabled = reviewingTickets.has(ticket.key) || !review?.draftComment?.trim();
 				post.addEventListener("click", () => {
 					if (review?.draftComment.trim())
 						ctx.send({ action: "post_review", key: ticket.key, comment: review.draftComment });
