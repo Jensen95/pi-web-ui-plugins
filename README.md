@@ -8,6 +8,8 @@ These are English-only TypeScript ports of the upstream plugins. `legado-web` (C
 (China-only WeChat), and `demo-mailbox` (an upstream protocol sample, not in its catalog) are deliberate skips. See
 [Acknowledgements](#acknowledgements) for where they came from.
 
+This is also a monorepo: `packages/pi-claude-agent-sdk` is a separately installable pi provider package and is not part of the pi-web-ui catalog.
+
 ## Plugins
 
 | id                  | icon | What it does                                                                                                                 | Permissions                 |
@@ -29,6 +31,16 @@ These are English-only TypeScript ports of the upstream plugins. `legado-web` (C
 
 `plugins/catalog.json` is the machine-readable form of this table. pi-web-ui reads it as its built-in
 plugin-marketplace list, so the two must not drift.
+
+## Claude provider package
+
+`packages/pi-claude-agent-sdk` registers Claude Code as a pi model provider. Install it directly with:
+
+```sh
+pi install npm:pi-claude-agent-sdk
+```
+
+It supports arbitrary named Claude/Codex accounts, account switching with `/claude-account`, and cached 5-hour/7-day usage reporting with `/claude-usage`. See [`packages/pi-claude-agent-sdk/README.md`](packages/pi-claude-agent-sdk/README.md) for account configuration and authentication details.
 
 ## Browser extension
 
@@ -84,7 +96,7 @@ Runtime packages for plugins that need them are installed by pi-web-ui on first 
 ## Development
 
 ```sh
-npm install              # once; every dependency lives in the root package.json
+npm install              # once; installs the root project and workspace packages
 npm run build            # compile every pi-web-ui plugin plus the two vendor bundles
 npm run build:extension  # build the standalone Page Picker browser extension
 npm run build:catalog-sync # compile the catalog sync plugin
@@ -93,9 +105,9 @@ npm run build:worktree-preparer # compile the worktree preparer plugin
 npm run build:voice-input      # compile the voice input plugin
 npm run build:subagent-config # compile the subagent config plugin
 npm run build:mermaid    # compile one plugin (also available for every other id)
-npm test                 # vitest, tests/unit/*.test.ts
-npm run typecheck        # tsc --noEmit, strict, over plugin and extension TypeScript plus tests
-npm run lint             # oxlint over plugins/, scripts/, tests/
+npm test                 # vitest plus the provider package's offline unit suite
+npm run typecheck        # root TypeScript plus packages/pi-claude-agent-sdk/typecheck
+npm run lint             # oxlint over packages/, plugins/, scripts/, tests/
 npm run check:english    # fail on any CJK character in the repo or its artifacts
 npm run format           # prettier --write (tabs, printWidth 120)
 npm run clean            # remove generated plugin entries and vendor bundles
