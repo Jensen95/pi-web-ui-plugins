@@ -376,7 +376,9 @@ describe("Jira review client", () => {
 		expect(descendants(container).some((element) => element.dataset.ui === "jira-settings")).toBe(false);
 		expect(descendants(container).some((element) => element.dataset.action === "settings")).toBe(false);
 		const style = descendants(container).find((element) => element.tagName === "style")?.textContent ?? "";
-		expect(style).toContain(".jira-review__tickets { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));");
+		expect(style).toContain(
+			".jira-review__tickets { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));",
+		);
 		expect(style).toContain(".jira-review__settings { display: grid;");
 	});
 
@@ -560,10 +562,13 @@ describe("Jira review client", () => {
 	});
 
 	it("starts one ticket on demand and marks it as in progress", () => {
-		const startChat = vi.fn<(options: { prompt: string; newChat?: boolean }) => boolean>(() => true);
+		const startChat = vi.fn<(options: { prompt: string; newChat?: boolean; model?: string }) => boolean>(() => true);
 		const { ctx, push } = createMockViewContext("jira-review");
 		const document = createFakeDocument();
-		document.defaultView.__piWebUiHost = { startChat };
+		document.defaultView.__piWebUiHost = {
+			startChat,
+			models: { list: () => [{ id: "openai/gpt-5-mini", provider: "openai", name: "GPT-5 mini" }] },
+		};
 		const container = document.createElement("div");
 		jiraClient.mount?.(container as unknown as HTMLElement, ctx);
 		push({
@@ -576,6 +581,9 @@ describe("Jira review client", () => {
 				reviews: {},
 			},
 		});
+		const model = descendants(container).find((element) => element.dataset.field === "review-model");
+		expect(model?.disabled).toBe(false);
+		model!.value = "openai/gpt-5-mini";
 
 		descendants(container)
 			.find((element) => element.dataset.action === "start-review")!
@@ -583,6 +591,7 @@ describe("Jira review client", () => {
 
 		expect(startChat).toHaveBeenCalledTimes(1);
 		expect(startChat.mock.calls[0]![0].prompt).toContain("ABC-1");
+		expect(startChat.mock.calls[0]![0].model).toBe("openai/gpt-5-mini");
 		expect(descendants(container).some((element) => element.textContent === "Review in progress")).toBe(true);
 		expect(descendants(container).find((element) => element.dataset.action === "start-review")?.disabled).toBe(true);
 	});
@@ -610,7 +619,12 @@ interface FakeElement {
 }
 
 interface FakeDocument {
-	defaultView: { __piWebUiHost?: { startChat?: (options: { prompt: string; newChat?: boolean }) => boolean } };
+	defaultView: {
+		__piWebUiHost?: {
+			startChat?: (options: { prompt: string; newChat?: boolean; model?: string }) => boolean;
+			models?: { list?: () => readonly { id: string; provider: string; name?: string }[] };
+		};
+	};
 	createElement(tagName: string): FakeElement;
 }
 

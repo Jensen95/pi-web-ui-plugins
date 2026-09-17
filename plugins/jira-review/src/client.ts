@@ -2,8 +2,15 @@ import type { JiraReview, JiraTicket } from "./index";
 
 const DEFAULT_READY_JQL = 'assignee IS EMPTY AND statusCategory = "To Do"';
 
+interface ModelInfo {
+	id: string;
+	provider: string;
+	name?: string;
+}
+
 interface StartChatHost {
-	startChat?: (options: { prompt: string; newChat?: boolean }) => boolean;
+	startChat?: (options: { prompt: string; newChat?: boolean; model?: string }) => boolean;
+	models?: { list?: () => readonly ModelInfo[] };
 }
 
 interface ViewContext {
@@ -53,13 +60,15 @@ export function startTicketReviews(
 	folders: readonly string[] = [],
 	ticketFolders: Record<string, readonly string[]> = {},
 	delayMs = 0,
+	model = "",
 ): number {
 	if (!host || typeof host.startChat !== "function") return 0;
 	let started = 0;
 	const start = (ticket: JiraTicket): void => {
 		try {
 			const selected = ticketFolders[ticket.key] ?? folders;
-			if (host.startChat!({ prompt: buildReviewPrompt(ticket, selected), newChat: true }) !== false) started += 1;
+			if (host.startChat!({ prompt: buildReviewPrompt(ticket, selected), newChat: true, ...(model ? { model } : {}) }) !== false)
+				started += 1;
 		} catch {
 			// A missing browser bridge should not break the Jira view.
 		}
@@ -138,8 +147,10 @@ const VIEW_STYLE = `
 .jira-review__header { display: grid; gap: 5px; }
 .jira-review__header h1 { margin: 0; font-size: 1.5rem; letter-spacing: -.02em; }
 .jira-review__header p { margin: 0; opacity: .72; }
-.jira-review__toolbar { display: grid; grid-template-columns: 1fr repeat(2, max-content); gap: 10px; align-items: center; }
-.jira-review__sprint { display: grid; gap: 3px; }
+.jira-review__toolbar { display: grid; grid-template-columns: 1fr minmax(220px, .8fr) repeat(2, max-content); gap: 10px; align-items: center; }
+.jira-review__sprint, .jira-review__model { display: grid; gap: 3px; }
+.jira-review__model span { font-size: .8rem; font-weight: 700; letter-spacing: .06em; opacity: .65; text-transform: uppercase; }
+.jira-review__model input { box-sizing: border-box; width: 100%; padding: 8px 9px; border: 1px solid color-mix(in srgb, currentColor 24%, transparent); border-radius: 8px; background: transparent; color: inherit; font: inherit; }
 .jira-review__sprint span { font-size: .8rem; font-weight: 700; letter-spacing: .06em; opacity: .65; text-transform: uppercase; }
 .jira-review__sprint strong { font-size: 1.1rem; }
 .jira-review button { padding: 8px 12px; border: 1px solid color-mix(in srgb, currentColor 28%, transparent); border-radius: 8px; background: transparent; color: inherit; font: inherit; font-weight: 650; cursor: pointer; }
@@ -238,6 +249,7 @@ export default {
 		let submittedSettings: Record<string, string> | undefined;
 		let reviewingTickets = new Set<string>();
 		let selectedFolders: string[] = [];
+		let selectedModel = "";
 		let ticketFolderInputs = new Map<string, HTMLInputElement>();
 		const bridge =
 			document.defaultView && (document.defaultView as Window & { __piWebUiHost?: StartChatHost }).__piWebUiHost;
@@ -360,12 +372,34 @@ export default {
 
 			const toolbar = makeElement(document, "div");
 			toolbar.className = "jira-review__toolbar";
+			let models: readonly ModelInfo[] = [];
+			try {
+				models = bridge?.models?.list?.() ?? [];
+			} catch {
+				// Old or unavailable host bridge: use the active model.
+			}
 			const sprint = makeElement(document, "div");
 			sprint.className = "jira-review__sprint";
 			sprint.append(
 				makeElement(document, "span", "Active sprint"),
 				makeElement(document, "strong", state.activeSprint?.name ?? "None loaded"),
 			);
+			const modelControl = makeElement(document, "label");
+			modelControl.className = "jira-review__model";
+			modelControl.append(makeElement(document, "span", "Review model"));
+			const modelInput = field(document, "review-model", selectedModel);
+			modelInput.placeholder = models.length ? "Use current model" : "Update pi-web-ui for model selection";
+			modelInput.disabled = !models.length;
+			const modelOptions = makeElement(document, "datalist") as HTMLDataListElement;
+			modelOptions.setAttribute("id", "jira-review-models");
+			for (const entry of models) {
+				const option = makeElement(document, "option") as HTMLOptionElement;
+				option.value = entry.id;
+				option.textContent = entry.name ? `${entry.name} (${entry.id})` : entry.id;
+				modelOptions.append(option);
+			}
+			modelInput.setAttribute("list", "jira-review-models");
+			modelControl.append(modelInput, modelOptions);
 			const refresh = makeElement(document, "button", "Refresh tickets") as HTMLButtonElement;
 			refresh.type = "button";
 			refresh.dataset.action = "refresh";
@@ -384,12 +418,13 @@ export default {
 				);
 				// The host creates a tab asynchronously; launching all of them in one event
 				// turn loses every request after the first.
-				if (startTicketReviews(bridge, ticketsToStart, selectedFolders, overrides, 100)) {
+				selectedModel = modelInput.value.trim();
+				if (startTicketReviews(bridge, ticketsToStart, selectedFolders, overrides, 100, selectedModel)) {
 					for (const ticket of ticketsToStart) reviewingTickets.add(ticket.key);
 					render();
 				}
 			});
-			toolbar.append(sprint, refresh, start);
+			toolbar.append(sprint, modelControl, refresh, start);
 
 			const foldersPanel = makeElement(document, "section");
 			foldersPanel.dataset.ui = "folders";
@@ -463,7 +498,8 @@ export default {
 				startReview.disabled = reviewingTickets.has(ticket.key);
 				startReview.addEventListener("click", () => {
 					const foldersForTicket = parseFolderOverride(folders.value) ?? selectedFolders;
-					if (startTicketReviews(bridge, [ticket], foldersForTicket)) {
+					selectedModel = modelInput.value.trim();
+					if (startTicketReviews(bridge, [ticket], foldersForTicket, {}, 0, selectedModel)) {
 						reviewingTickets.add(ticket.key);
 						render();
 					}
