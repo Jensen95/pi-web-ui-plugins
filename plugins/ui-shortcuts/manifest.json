@@ -4,6 +4,7 @@
 	"version": "0.1.0",
 	"icon": "⌨️",
 	"description": "Keyboard shortcuts for switching views, with custom bindings for views, composer drafts, and new-chat prompts.",
+	"permissions": ["ui"],
 	"ui": {
 		"settings.pages": [
 			{

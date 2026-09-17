@@ -398,7 +398,11 @@ const MAX_EXEC_OUTPUT = 256 * 1024;
 const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
 const MAX_SSH_HOSTS = 32;
 
-const PERMISSIONS = ["fs:workspace+ssh", "net:ssh", "terminal"];
+/** The host's fs gate is exact string membership, not a family prefix: canUse only
+ *  accepts "fs", "fs:read" or "fs:write", so the descriptive "fs:workspace+ssh" this
+ *  plugin used to declare satisfied nothing and was denied in strict mode. The
+ *  workspace + SSH scope it described is documented in the plugin README instead. */
+const PERMISSIONS = ["fs", "net:ssh", "terminal"];
 
 /** CJK scan for one runtime string, using the class repo-files.ts defines. */
 function cjkIn(text: string): string[] {

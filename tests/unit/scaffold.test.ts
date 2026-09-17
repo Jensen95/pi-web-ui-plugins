@@ -36,6 +36,7 @@ const EXPECTED_PLUGIN_IDS = [
 	"subagent-config",
 	"topbar-fix",
 	"ui-shortcuts",
+	"voice-input",
 	"vscode-editor",
 	"webmail",
 	"worktree-preparer",

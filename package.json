@@ -37,6 +37,7 @@
 		"build:ui-shortcuts": "node scripts/build-plugins.mjs ui-shortcuts",
 		"build:topbar-fix": "node scripts/build-plugins.mjs topbar-fix",
 		"build:worktree-preparer": "node scripts/build-plugins.mjs worktree-preparer",
+		"build:voice-input": "node scripts/build-plugins.mjs voice-input",
 		"build:extension": "node plugins/page-picker/extension/build.mjs",
 		"pack:extension": "node plugins/page-picker/extension/pack.mjs",
 		"clean": "node scripts/clean.mjs",

@@ -4,26 +4,28 @@ Interface plugins for [pi-web-ui](https://github.com/xing-shuyin/pi-web-ui), the
 [pi](https://github.com/badlogic/pi-mono) coding agent. Each plugin adds a tab, an agent tool, a shortcut,
 or a fenced-code renderer to that UI.
 
-These are English-only TypeScript ports of the upstream plugins. See
+These are English-only TypeScript ports of the upstream plugins. `legado-web` (Chinese web-novel sources), `wechat-ilink`
+(China-only WeChat), and `demo-mailbox` (an upstream protocol sample, not in its catalog) are deliberate skips. See
 [Acknowledgements](#acknowledgements) for where they came from.
 
 ## Plugins
 
-| id                  | icon | What it does                                                                                                                 | Permissions                               |
-| ------------------- | ---- | ---------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
-| `topbar-fix`        | 🩹   | Stopgap stylesheet for pi-web-ui#162: the top-bar overflow menu is clipped and never visible. Temporary.                     | none                                      |
-| `catalog-sync`      | 🔄   | Settings page (no tab) that writes this repository's plugin list into the marketplace (`host.reloadCatalog`).                | none                                      |
-| `jira-review`       | 🎟️   | Reviews active Jira Cloud sprint tickets, saves agent-readiness scores, and manually posts approved notes.                   | `fs`, `net`, `tools`                      |
-| `webmail`           | 📬   | IMAP inbox, SMTP sending and new-mail notifications, with an optional switch that lets the agent manage the mailbox.         | `net:imap/smtp`, `tools`                  |
-| `db-client`         | 🗄️   | Schema browsing, SQL queries and row editing across MySQL, PostgreSQL, SQLite, SQL Server, MongoDB and Redis.                | `net`, `tools`                            |
-| `vscode-editor`     | 📝   | Multi-root file tree, tabbed CodeMirror editing, xterm.js terminals, Remote-SSH browsing and SFTP sync.                      | `fs:workspace+ssh`, `net:ssh`, `terminal` |
-| `mermaid`           | 📊   | Renders `mermaid` fences in messages as SVG. Renderer plugin, so the engine loads only when such a fence appears.            | none                                      |
-| `run-trace`         | 🧭   | Aggregates a run into one replayable timeline: task, reasoning, tool calls, file changes, result.                            | none                                      |
-| `mcp-manager`       | 🔌   | Manages MCP servers through `pi-mcp-adapter`: inspect the effective config, enable or disable servers, add or remove them.   | `http`                                    |
-| `image-toolkit`     | 🖼    | Compresses, crops, resizes, converts, watermarks and inspects workspace images, with four AI tools.                          | `fs`, `http`, `tools`                     |
-| `ui-shortcuts`      | ⌨️   | Switches between the Terminal, Editor and Run Trace views, with a small UI for custom view, compose, and new-chat shortcuts. | none                                      |
-| `worktree-preparer` | 🌿   | Assembles selected workspace folders and Git repositories into a fresh multi-project worktree folder.                        | `fs`, `terminal`                          |
-| `subagent-config`   | 🧩   | Settings page that edits pi-subagents agent files and `subagents.json`, validating model pins against the model store.       | `fs`, `ui`                                |
+| id                  | icon | What it does                                                                                                                 | Permissions                 |
+| ------------------- | ---- | ---------------------------------------------------------------------------------------------------------------------------- | --------------------------- |
+| `topbar-fix`        | 🩹   | Stopgap stylesheet for pi-web-ui#162: the top-bar overflow menu is clipped and never visible. Temporary.                     | none                        |
+| `catalog-sync`      | 🔄   | Settings page (no tab) that writes this repository's plugin list into the marketplace (`host.reloadCatalog`).                | none                        |
+| `jira-review`       | 🎟️   | Reviews active Jira Cloud sprint tickets, saves agent-readiness scores, and manually posts approved notes.                   | `fs`, `net`, `tools`        |
+| `webmail`           | 📬   | IMAP inbox, SMTP sending and new-mail notifications, with an optional switch that lets the agent manage the mailbox.         | `net:imap/smtp`, `tools`    |
+| `db-client`         | 🗄️   | Schema browsing, SQL queries and row editing across MySQL, PostgreSQL, SQLite, SQL Server, MongoDB and Redis.                | `net`, `tools`              |
+| `vscode-editor`     | 📝   | Multi-root file tree, tabbed CodeMirror editing, xterm.js terminals, Remote-SSH browsing and SFTP sync.                      | `fs`, `net:ssh`, `terminal` |
+| `mermaid`           | 📊   | Renders `mermaid` fences in messages as SVG. Renderer plugin, so the engine loads only when such a fence appears.            | none                        |
+| `run-trace`         | 🧭   | Aggregates a run into one replayable timeline: task, reasoning, tool calls, file changes, result.                            | none                        |
+| `mcp-manager`       | 🔌   | Manages MCP servers through `pi-mcp-adapter`: inspect the effective config, enable or disable servers, add or remove them.   | `http`                      |
+| `image-toolkit`     | 🖼    | Compresses, crops, resizes, converts, watermarks and inspects workspace images, with four AI tools.                          | `fs`, `http`, `tools`       |
+| `ui-shortcuts`      | ⌨️   | Switches between the Terminal, Editor and Run Trace views, with a small UI for custom view, compose, and new-chat shortcuts. | none                        |
+| `worktree-preparer` | 🌿   | Assembles selected workspace folders and Git repositories into a fresh multi-project worktree folder.                        | `fs`, `terminal`            |
+| `subagent-config`   | 🧩   | Settings page that edits pi-subagents agent files and `subagents.json`, validating model pins against the model store.       | `fs`, `ui`                  |
+| `voice-input`       | 🎤   | Dictates into the composer with browser speech recognition and remote or offline Whisper fallback.                           | `ui`, `http`                |
 
 `plugins/catalog.json` is the machine-readable form of this table. pi-web-ui reads it as its built-in
 plugin-marketplace list, so the two must not drift.
@@ -88,6 +90,7 @@ npm run build:extension  # build the standalone Page Picker browser extension
 npm run build:catalog-sync # compile the catalog sync plugin
 npm run build:jira-review  # compile the Jira review plugin
 npm run build:worktree-preparer # compile the worktree preparer plugin
+npm run build:voice-input      # compile the voice input plugin
 npm run build:subagent-config # compile the subagent config plugin
 npm run build:mermaid    # compile one plugin (also available for every other id)
 npm test                 # vitest, tests/unit/*.test.ts

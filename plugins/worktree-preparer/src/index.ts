@@ -1,5 +1,6 @@
-import { resolve } from "node:path";
+import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import {
+	addFolders,
 	defaultOutputBase,
 	defaultRunner,
 	prepareProject,
@@ -17,6 +18,8 @@ type Host = {
 	onCwdChange?(handler: (cwd: string) => void): () => void;
 	fs: {
 		list(relDir?: string): Promise<{ name: string; type: "file" | "dir" }[]>;
+		requestAccess?(dir: string, reason?: string): Promise<boolean>;
+		listPath?(dir: string): Promise<{ name: string; type: "file" | "dir" }[]>;
 	};
 };
 
@@ -89,10 +92,24 @@ export default {
 			publish();
 		};
 
-		const refresh = async (clientId?: string): Promise<void> => {
-			const cwd = host.cwd;
+		const isInside = (root: string, candidate: string): boolean => {
+			const suffix = relative(resolve(root), resolve(candidate));
+			return suffix === "" || (suffix !== ".." && !suffix.startsWith(`..${sep}`) && !isAbsolute(suffix));
+		};
+
+		const refresh = async (clientId?: string, requestedCwd = host.cwd): Promise<void> => {
+			const cwd = resolve(requestedCwd);
 			try {
-				const entries = await host.fs.list();
+				let entries: { name: string; type: "file" | "dir" }[];
+				if (cwd === resolve(host.cwd)) {
+					entries = await host.fs.list();
+				} else {
+					if (!host.fs.requestAccess || !host.fs.listPath)
+						throw new Error("This host cannot browse outside the workspace");
+					const allowed = await host.fs.requestAccess(cwd, "Browse folders for Worktree Preparer");
+					if (!allowed) throw new Error(`Access was not granted for ${cwd}`);
+					entries = await host.fs.listPath(cwd);
+				}
 				const folders = entries
 					.filter((entry) => entry.type === "dir")
 					.map((entry) => entry.name)
@@ -112,10 +129,21 @@ export default {
 		const unregister = host.onMessage(async (payload, from) => {
 			if (!isRecord(payload) || typeof payload.action !== "string") return;
 			if (payload.action === "get_state") {
-				await refresh(from);
+				await refresh(from, state.cwd);
 				return;
 			}
-			if (payload.action !== "prepare") return;
+			if (payload.action === "browse_up") {
+				const parent = dirname(state.cwd);
+				if (parent !== state.cwd) await refresh(from, parent);
+				return;
+			}
+			if (payload.action === "browse_into") {
+				const name = typeof payload.name === "string" ? payload.name : "";
+				const child = resolve(state.cwd, name);
+				if (name && !name.includes("..") && isInside(state.cwd, child)) await refresh(from, child);
+				return;
+			}
+			if (payload.action !== "prepare" && payload.action !== "add") return;
 
 			state = { ...state, busy: true, error: null };
 			publish(from);
@@ -123,25 +151,45 @@ export default {
 				const selections = Array.isArray(payload.selections)
 					? payload.selections.filter((selection): selection is string => typeof selection === "string")
 					: [];
-				const result = await prepareProject({
-					workspaceRoot: host.cwd,
-					outputBase: typeof payload.outputBase === "string" && payload.outputBase ? payload.outputBase : undefined,
-					outputName: typeof payload.outputName === "string" ? payload.outputName : "",
-					branch: typeof payload.branch === "string" ? payload.branch : "",
-					baseBranch: typeof payload.baseBranch === "string" && payload.baseBranch ? payload.baseBranch : undefined,
-					selections,
-				});
-				state = {
-					...state,
-					cwd: host.cwd,
-					busy: false,
-					result,
-					// Per-entry failures live in `result`, which the view renders per row;
-					// mirroring them here too would print every message twice.
-					error: null,
-				};
+				if (payload.action === "prepare") {
+					const result = await prepareProject({
+						workspaceRoot: state.cwd,
+						outputBase: typeof payload.outputBase === "string" && payload.outputBase ? payload.outputBase : undefined,
+						outputName: typeof payload.outputName === "string" ? payload.outputName : "",
+						branch: typeof payload.branch === "string" ? payload.branch : "",
+						baseBranch: typeof payload.baseBranch === "string" && payload.baseBranch ? payload.baseBranch : undefined,
+						selections,
+					});
+					state = { ...state, busy: false, result, error: null };
+				} else if (state.result) {
+					const additions = await addFolders(
+						{
+							workspaceRoot: state.cwd,
+							outputRoot: state.result.root,
+							branch: state.result.branch,
+							selections,
+							existingNames: state.result.entries.map((entry) => entry.name),
+							existingSources: state.result.entries.map((entry) => entry.source),
+						},
+						{ runner },
+					);
+					const errors = [...state.result.errors, ...additions.errors];
+					state = {
+						...state,
+						busy: false,
+						result: {
+							...state.result,
+							entries: [...state.result.entries, ...additions.entries],
+							errors,
+							ok: errors.length === 0,
+						},
+						error: null,
+					};
+				} else {
+					throw new Error("Prepare a workspace before adding folders");
+				}
 			} catch (error) {
-				state = { ...state, cwd: host.cwd, busy: false, result: null, error: String(error) };
+				state = { ...state, busy: false, result: payload.action === "add" ? state.result : null, error: String(error) };
 			}
 			publish(from);
 			if (!from) publish();

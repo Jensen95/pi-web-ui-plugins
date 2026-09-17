@@ -199,7 +199,9 @@ export default {
 			try {
 				host.storage?.set("config", cfg);
 			} catch (err) {
-				host.log("Saving the config failed:", err);
+				// The host formats non-string log args with JSON.stringify, and an Error
+				// stringifies to "{}" — always log the message text, never the raw value.
+				host.log("error", "Saving the config failed:", err instanceof Error ? err.message : String(err));
 			}
 			host.broadcast({ kind: "settings", values: cfg });
 			syncTools();
@@ -229,7 +231,8 @@ export default {
 				host.log("jpeg-js is ready (the server can process JPEG)");
 				return true;
 			} catch (err) {
-				host.log("Loading jpeg-js failed:", err);
+				// Degraded but alive: JPEG stays unavailable, every other format still works.
+				host.log("warn", "Loading jpeg-js failed:", err instanceof Error ? err.message : String(err));
 				return false;
 			}
 		}
@@ -874,7 +877,7 @@ export default {
 					await handler(req, res);
 				} catch (err) {
 					const msg = err instanceof Error ? err.message : String(err);
-					host.log(`http ${method} ${path} failed:`, err);
+					host.log("error", `http ${method} ${path} failed:`, msg);
 					if (!res.headersSent) res.status(400).json({ error: msg });
 					else res.end();
 				}

@@ -10,10 +10,11 @@ projects as the files it works on.
 
 ## Using it
 
-1. **Pick the folders.** Each row says what will happen to it, once the background Git probe has finished.
+1. **Browse and pick folders.** Use **Open** to enter a folder and **Up** to browse its parent; folders outside the current workspace require an explicit host access grant.
 2. **Name the branch and the folder.** The resolved absolute path is shown live under the field.
 3. **Press Prepare** and read the per-folder report.
 4. **Press Open session here** to work in the result.
+5. After a successful run, select another folder and press **Add selected folders** to add it to the existing aggregate. Git repositories use the same branch when possible; plain folders are copied with the same exclusions.
 
 ## Where the aggregate lands
 
@@ -23,7 +24,8 @@ the scope you asked for.
 
 The field also accepts `~/somewhere/name` or an absolute path, used as written. Refused: an empty name, any `..`
 segment, a NUL byte, an absolute path less than two segments deep (`/`, `/tmp`), a path inside or containing a selected
-folder, and an aggregate directory that already exists (it is never reused or merged into).
+folder, and an aggregate directory that already exists (it is never reused or merged into). Existing aggregates are only
+changed by the explicit **Add selected folders** action.
 
 ## Default-branch detection
 

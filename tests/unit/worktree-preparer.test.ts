@@ -14,6 +14,7 @@ import worktreeClient, {
 import worktreeServer from "../../plugins/worktree-preparer/src/index";
 import {
 	DEFAULT_EXCLUDES,
+	addFolders,
 	defaultOutputBase,
 	prepareProject,
 	resolveDefaultBranch,
@@ -151,6 +152,49 @@ describe("worktree preparation operations", () => {
 			},
 		]);
 		expect(result.errors).toEqual([]);
+	});
+
+	it("adds a new repository worktree to an existing aggregate without reusing the branch setup", async () => {
+		const runner = gitRunner({ repos: { "/workspace/repo-b": "/workspace/repo-b" } });
+		const fs = fileOps();
+		const result = await addFolders(
+			{
+				workspaceRoot: "/workspace",
+				outputRoot: "/aggregates/demo",
+				branch: "agent/demo",
+				selections: ["repo-b"],
+				existingNames: ["repo-a"],
+				existingSources: ["/workspace/repo-a"],
+			},
+			{ runner, fs },
+		);
+		expect(result.errors).toEqual([]);
+		expect(result.entries[0]).toMatchObject({
+			source: "/workspace/repo-b",
+			name: "repo-b",
+			kind: "worktree",
+			destination: "/aggregates/demo/repo-b",
+		});
+		expect(runner.calls.some(({ args }) => args[2] === "worktree")).toBe(true);
+		expect(fs.copyTree).not.toHaveBeenCalled();
+	});
+
+	it("rejects adding a repository already represented in the aggregate", async () => {
+		const result = await addFolders(
+			{
+				workspaceRoot: "/workspace",
+				outputRoot: "/aggregates/demo",
+				branch: "agent/demo",
+				selections: ["repo-a/subfolder"],
+				existingNames: [],
+				existingSources: ["/workspace/repo-a"],
+			},
+			{
+				runner: gitRunner({ repos: { "/workspace/repo-a/subfolder": "/workspace/repo-a" } }),
+				fs: fileOps(),
+			},
+		);
+		expect(result.errors[0]).toMatch(/already in the aggregate/i);
 	});
 
 	it("falls back through ls-remote to master, and lets the caller override the base branch", async () => {

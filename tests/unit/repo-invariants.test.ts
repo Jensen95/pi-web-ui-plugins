@@ -24,7 +24,7 @@ import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { CJK_RE, findCjk, formatCjkHits, isGitIgnored, pluginIds, repoPath } from "../helpers/repo-files";
 
-/** The thirteen plugins this repo ships, and the source entries each one must compile to. */
+/** The fourteen plugins this repo ships, and the source entries each one must compile to. */
 const EXPECTED_ARTIFACTS: Record<string, { server: boolean; client: boolean }> = {
 	"catalog-sync": { server: false, client: true },
 	"db-client": { server: true, client: true },
@@ -39,6 +39,7 @@ const EXPECTED_ARTIFACTS: Record<string, { server: boolean; client: boolean }> =
 	webmail: { server: true, client: true },
 	"topbar-fix": { server: false, client: true },
 	"worktree-preparer": { server: true, client: true },
+	"voice-input": { server: true, client: true },
 };
 const EXPECTED_IDS = Object.keys(EXPECTED_ARTIFACTS).sort();
 

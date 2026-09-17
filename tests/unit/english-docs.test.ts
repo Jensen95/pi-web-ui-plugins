@@ -37,7 +37,9 @@ const PLUGINS = [
 		name: "Editor",
 		version: "0.3.1",
 		icon: undefined,
-		permissions: ["fs:workspace+ssh", "net:ssh", "terminal"],
+		// "fs", not the old descriptive "fs:workspace+ssh": the host matches fs capability
+		// strings exactly ("fs" / "fs:read" / "fs:write") and denies anything else.
+		permissions: ["fs", "net:ssh", "terminal"],
 		view: undefined,
 		renderers: undefined,
 	},

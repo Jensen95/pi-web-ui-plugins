@@ -16,7 +16,7 @@ import { findCjk, formatCjkHits, repoPath } from "../helpers/repo-files";
 
 const CATALOG_REL = "plugins/catalog.json";
 
-/** The thirteen plugins this repo ships. legado-web and demo-mailbox are not ported. */
+/** The fourteen plugins this repo ships. legado-web, wechat-ilink and demo-mailbox are not ported. */
 const EXPECTED_IDS = [
 	"catalog-sync",
 	"db-client",
@@ -31,6 +31,7 @@ const EXPECTED_IDS = [
 	"vscode-editor",
 	"webmail",
 	"worktree-preparer",
+	"voice-input",
 ].sort();
 
 /** Where every entry must point: this repo, not upstream. */

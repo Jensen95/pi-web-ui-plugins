@@ -413,3 +413,132 @@ export async function prepareProject(
 	result.ok = result.errors.length === 0 && result.entries.length > 0;
 	return result;
 }
+
+export interface AddFoldersInput {
+	/** Absolute workspace root against which selections are resolved. */
+	workspaceRoot: string;
+	/** Existing aggregate root. */
+	outputRoot: string;
+	/** Branch used by the original preparation run. */
+	branch: string;
+	/** Workspace-relative folders to add. */
+	selections: string[];
+	/** Names already present in the aggregate. */
+	existingNames?: string[];
+	/** Repository roots already represented by worktrees in the aggregate. */
+	existingSources?: string[];
+}
+
+/** Add folders to an existing aggregate without recreating or reusing it. */
+export async function addFolders(
+	input: AddFoldersInput,
+	deps: { runner?: CommandRunner; fs?: unknown } = {},
+): Promise<{ entries: PrepareEntry[]; errors: string[] }> {
+	if (!isAbsolute(input.workspaceRoot ?? "")) throw new Error("workspaceRoot must use an absolute path");
+	if (!isAbsolute(input.outputRoot ?? "")) throw new Error("output root must use an absolute path");
+	const branchError = validateBranchName(input.branch);
+	if (branchError) throw new Error(branchError);
+	if (!Array.isArray(input.selections) || input.selections.length === 0) throw new Error("select at least one folder");
+
+	const workspaceRoot = resolve(input.workspaceRoot);
+	const outputRoot = resolve(input.outputRoot);
+	const runner = deps.runner ?? defaultRunner;
+	const fs = (deps.fs as FileOperations | undefined) ?? defaultFileOperations;
+	const names = new Set(input.existingNames ?? []);
+	const sources = new Set((input.existingSources ?? []).map((source) => resolve(source)));
+	const entries: PrepareEntry[] = [];
+	const errors: string[] = [];
+	const selected = [...new Set(input.selections)];
+
+	for (const selection of selected) {
+		const selectionError = validateSelection(workspaceRoot, selection);
+		if (selectionError) {
+			errors.push(selectionError);
+			continue;
+		}
+		const source = resolve(workspaceRoot, selection.replaceAll("\\", sep));
+		if (inside(outputRoot, source) || inside(source, outputRoot)) {
+			errors.push(`selection "${selection}" conflicts with output path`);
+			continue;
+		}
+		const name = basename(source);
+		const blank = { source, destination: "", name, kind: "skipped" as const, baseBranch: null };
+		if (names.has(name)) {
+			const message = `${selection}: duplicate destination name "${name}"`;
+			errors.push(message);
+			entries.push({ ...blank, error: message });
+			continue;
+		}
+		names.add(name);
+		const destination = resolve(outputRoot, name);
+		let probe: CommandResult;
+		try {
+			probe = await runner.run("git", ["-C", source, "rev-parse", "--show-toplevel"], workspaceRoot);
+		} catch (error) {
+			probe = { code: 1, stdout: "", stderr: String(error) };
+		}
+
+		if (probe.code === 0) {
+			const rootText = probe.stdout.trim();
+			if (!rootText) {
+				const message = `${source}: Git discovery returned no repository root`;
+				errors.push(message);
+				entries.push({ ...blank, error: message });
+				continue;
+			}
+			const repository = resolve(rootText);
+			if (!inside(workspaceRoot, repository)) {
+				const message = `${source}: git repository is outside the workspace`;
+				errors.push(message);
+				entries.push({ ...blank, error: message });
+				continue;
+			}
+			if (sources.has(repository)) {
+				const message = `${source}: this repository is already in the aggregate`;
+				errors.push(message);
+				entries.push({ ...blank, source: repository, destination, error: message });
+				continue;
+			}
+			try {
+				const baseBranch = await resolveDefaultBranch(runner, repository);
+				const branchExists = await runner.run(
+					"git",
+					["-C", repository, "show-ref", "--verify", "--quiet", `refs/heads/${input.branch}`],
+					repository,
+				);
+				if (branchExists.code !== 0) {
+					const fetched = await runner.run("git", ["-C", repository, "fetch", "origin", baseBranch], repository);
+					if (fetched.code !== 0) throw new Error(errorText(repository, `fetch origin/${baseBranch}`, fetched));
+				}
+				const args =
+					branchExists.code === 0
+						? ["-C", repository, "worktree", "add", destination, input.branch]
+						: ["-C", repository, "worktree", "add", "-b", input.branch, destination, `origin/${baseBranch}`];
+				const added = await runner.run("git", args, repository);
+				if (added.code !== 0) throw new Error(errorText(repository, "add worktree", added));
+				entries.push({ source: repository, destination, name, kind: "worktree", baseBranch, error: null });
+				sources.add(repository);
+			} catch (error) {
+				const message = `${repository}: ${String(error)}`;
+				errors.push(message);
+				entries.push({ ...blank, source: repository, destination, error: message });
+			}
+			continue;
+		}
+		if (!isNotRepository(probe)) {
+			const message = errorText(source, "inspect Git repository", probe);
+			errors.push(message);
+			entries.push({ ...blank, error: message });
+			continue;
+		}
+		try {
+			await fs.copyTree(source, destination, DEFAULT_EXCLUDES);
+			entries.push({ source, destination, name, kind: "copy", baseBranch: null, error: null });
+		} catch (error) {
+			const message = `${source}: copy failed (${String(error)})`;
+			errors.push(message);
+			entries.push({ ...blank, destination, error: message });
+		}
+	}
+	return { entries, errors };
+}

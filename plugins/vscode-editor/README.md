@@ -21,6 +21,15 @@ The former standalone SSH plugin is merged here. The first activation automatica
 - **Selection highlighting:** Clicking or right-clicking any row selects it. The toolbar’s +📄 and +📁 actions use the selected directory, or the containing folder when a file is selected. A successfully created item becomes selected.
 - **Context menu:** Create, rename, delete, upload a file here, sync both directions, or open a terminal with scope awareness.
 
+## Permissions
+
+`manifest.json` declares `["fs", "net:ssh", "terminal"]`. The host's capability gate matches
+capability strings exactly (`fs`, `fs:read`, `fs:write`), so a descriptive string such as
+`"fs:workspace+ssh"` satisfies nothing and is denied in strict mode. The human intent behind that
+old string lives here instead: this plugin reads and writes the **local workspace** and, over SSH,
+**remote files through SFTP**, and it opens **remote shells**. `net:ssh` and `terminal` are
+declarative — the host does not gate them — but they are shown verbatim in Settings.
+
 ## Unified scope model
 
 The scope is `"local" | connId`. Every client file operation (`list`, `read`, `write`, `create`, `rename`, and `delete`) includes a scope; remote operations also include `connId`. The server routes the request to local fs or the matching connection’s SFTP, giving the client and server one shared path.

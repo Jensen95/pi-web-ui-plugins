@@ -80,6 +80,14 @@
 		"homepage": "https://github.com/Jensen95/pi-web-ui-plugins/tree/main/plugins/ui-shortcuts"
 	},
 	{
+		"id": "voice-input",
+		"name": "Voice Input",
+		"icon": "🎤",
+		"description": "Dictate into the composer with browser speech recognition, with remote or offline Whisper transcription as a fallback.",
+		"source": "Jensen95/pi-web-ui-plugins/plugins/voice-input",
+		"homepage": "https://github.com/Jensen95/pi-web-ui-plugins/tree/main/plugins/voice-input"
+	},
+	{
 		"id": "worktree-preparer",
 		"name": "Worktree Preparer",
 		"icon": "🌿",

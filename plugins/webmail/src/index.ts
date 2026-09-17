@@ -79,6 +79,8 @@ export interface WebmailHost {
 		stop?: () => void;
 	}): BackgroundTaskHandle;
 	secrets?: SecretStore;
+	/** An optional leading "debug"|"info"|"warn"|"error" sets the level (default "info").
+	 *  Non-string args are JSON.stringify'd by the host, so pass Error text, not Errors. */
 	log(...args: unknown[]): void;
 }
 
@@ -448,7 +450,7 @@ export default {
 				sec.set(name, String(value));
 				return sec.get?.(name) === String(value);
 			} catch (err) {
-				host.log(`failed to write secret ${name}:`, reasonText(err));
+				host.log("warn", `failed to write secret ${name}:`, reasonText(err));
 				return false;
 			}
 		}
@@ -458,7 +460,7 @@ export default {
 		function warnSecretsDegraded(): void {
 			if (secretsDegradedWarned) return;
 			secretsDegradedWarned = true;
-			host.log("encrypted storage unavailable; the password was saved as plain text in config.json");
+			host.log("warn", "encrypted storage unavailable; the password was saved as plain text in config.json");
 			host.notify(
 				"warning",
 				"📬 Webmail: encrypted storage unavailable - the password was saved as plain text in " +
@@ -594,7 +596,7 @@ export default {
 				try {
 					loaded[name] = await import(name);
 				} catch (err) {
-					host.log(`dependency ${name} is not ready:`, reasonText(err));
+					host.log("warn", `dependency ${name} is not ready:`, reasonText(err));
 					loaded[name] = null;
 				}
 			}
@@ -679,7 +681,7 @@ export default {
 					/* already dead */
 				}
 			}
-			if (why) host.log("connection dropped:", why);
+			if (why) host.log("warn", "connection dropped:", why);
 		}
 
 		async function ensureClient(): Promise<ImapClient> {
@@ -1188,7 +1190,7 @@ export default {
 						.catch((err) => host.notify("error", `📬 Send failed: ${reasonText(err)}`));
 					break;
 				default:
-					host.log("unknown action", msg.action);
+					host.log("warn", "unknown action", msg.action);
 			}
 		});
 
@@ -1206,7 +1208,8 @@ export default {
 				broadcastState();
 				host.log("activated", st.depsOk ? "(dependencies ready)" : "(installing dependencies)");
 			} catch (err) {
-				host.log("activation failed:", err);
+				// The host JSON.stringifies non-string args and an Error becomes "{}".
+				host.log("error", "activation failed:", reasonText(err));
 			}
 		})();
 

@@ -1,0 +1,83 @@
+{
+	"id": "voice-input",
+	"name": "Voice Input",
+	"version": "0.1.0",
+	"icon": "🎤",
+	"description": "Dictate into the composer with browser speech recognition, with remote or offline Whisper transcription as a fallback.",
+	"apiVersion": 2,
+	"permissions": ["ui", "http"],
+	"view": false,
+	"build": {
+		"install": "npm install --ignore-scripts --no-audit --no-fund esbuild@0.28.2",
+		"command": "npx --no-install esbuild src/index.ts --bundle --platform=node --format=esm --target=es2022 --packages=external --outfile=index.mjs && npx --no-install esbuild src/client.ts --bundle --platform=browser --format=esm --target=es2022 --loader:.css=text --external:./vendor/* --outfile=client/entry.mjs",
+		"outputs": ["index.mjs", "client/entry.mjs"]
+	},
+	"ui": {
+		"composer": [
+			{
+				"id": "mic",
+				"label": "Voice input",
+				"icon": "mic",
+				"kind": "action",
+				"action": "voice-input:toggle",
+				"order": 1,
+				"align": "start",
+				"hint": "Click to dictate into the input box (click again to finish)"
+			}
+		]
+	},
+	"settings": [
+		{
+			"key": "lang",
+			"type": "select",
+			"label": "Recognition language",
+			"default": "en-US",
+			"options": ["en-US", "en-GB", "ja-JP", "zh-CN", "zh-TW"],
+			"hint": "Language shared by browser speech recognition and server transcription"
+		},
+		{
+			"key": "serverFallback",
+			"type": "boolean",
+			"label": "Server transcription fallback",
+			"default": true,
+			"hint": "Record and send audio to local Whisper or the configured remote endpoint when browser recognition fails"
+		},
+		{
+			"key": "engine",
+			"type": "select",
+			"label": "Transcription engine",
+			"default": "auto",
+			"options": ["auto", "local", "remote"],
+			"hint": "Auto prefers local Whisper and falls back to the remote endpoint"
+		},
+		{
+			"key": "localModel",
+			"type": "select",
+			"label": "Local model",
+			"default": "base",
+			"options": ["base", "tiny", "small"],
+			"hint": "Tiny is faster; small is more accurate but uses more memory"
+		},
+		{
+			"key": "transcribeUrl",
+			"type": "text",
+			"label": "Transcription endpoint",
+			"default": "",
+			"hint": "OpenAI-compatible base URL, such as https://api.openai.com/v1"
+		},
+		{
+			"key": "transcribeKey",
+			"type": "password",
+			"label": "Transcription API key",
+			"default": "",
+			"hint": "Stored privately in the plugin data directory"
+		},
+		{
+			"key": "transcribeModel",
+			"type": "text",
+			"label": "Transcription model",
+			"default": "whisper-1",
+			"hint": "Model sent to the audio transcription endpoint"
+		}
+	]
+}

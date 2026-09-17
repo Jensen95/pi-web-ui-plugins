@@ -339,6 +339,9 @@ export default {
 			const bar = create("div", "worktree-preparer__bar");
 			const title = create("h2", undefined, `Folders in ${current.cwd || "this workspace"}`);
 			const actions = create("div", "worktree-preparer__actions");
+			const up = button("browse-up", "Up", !current.cwd || current.cwd === "/");
+			up.addEventListener("click", () => ctx.send({ action: "browse_up" }));
+			actions.append(up);
 			const all = button("select-all", "Select all", current.folders.length === 0);
 			all.addEventListener("click", () => {
 				for (const folder of current.folders) selected.add(folder.name);
@@ -365,7 +368,7 @@ export default {
 			const rows = create("div", "worktree-preparer__rows");
 			rows.append(
 				...current.folders.map((folder) => {
-					const row = create("label", "worktree-preparer__row");
+					const row = create("div", "worktree-preparer__row");
 					const box = document.createElement("input") as HTMLInputElement;
 					box.type = "checkbox";
 					box.dataset.field = "selection";
@@ -376,10 +379,13 @@ export default {
 						else selected.delete(folder.name);
 						render();
 					});
+					const open = button("browse-into", "Open");
+					open.addEventListener("click", () => ctx.send({ action: "browse_into", name: folder.name }));
 					row.append(
 						box,
 						create("span", "worktree-preparer__name", folder.name),
 						create("span", "worktree-preparer__kind", describeFolder(folder)),
+						open,
 					);
 					return row;
 				}),
@@ -496,19 +502,24 @@ export default {
 
 			const fields = fieldCard();
 			const busy = sent || current.busy;
-			const prepare = button("prepare", busy ? "Preparing..." : "Prepare", busy || selected.size === 0);
-			prepare.addEventListener("click", () => {
-				if (busy) return;
-				sent = true;
-				status = `Preparing ${selected.size} folder(s)...`;
-				ctx.send({
-					action: "prepare",
-					branch: fields.branch.value,
-					outputName: fields.output.value,
-					selections: current.folders.map((folder) => folder.name).filter((name) => selected.has(name)),
+			const submit = (action: "prepare" | "add", label: string): HTMLElement => {
+				const element = button(action, busy ? "Working..." : label, busy || selected.size === 0);
+				element.addEventListener("click", () => {
+					if (busy) return;
+					sent = true;
+					status = `${action === "add" ? "Adding" : "Preparing"} ${selected.size} folder(s)...`;
+					ctx.send({
+						action,
+						branch: fields.branch.value,
+						outputName: fields.output.value,
+						selections: current.folders.map((folder) => folder.name).filter((name) => selected.has(name)),
+					});
+					render();
 				});
-				render();
-			});
+				return element;
+			};
+			const prepare = submit("prepare", "Prepare");
+			const add = current.result ? submit("add", "Add selected folders") : null;
 			const run = create("section", "worktree-preparer__card");
 			const bar = create("div", "worktree-preparer__bar");
 			const statusLine = create(
@@ -517,7 +528,9 @@ export default {
 				busy ? status : selected.size === 0 ? "Select at least one folder to enable Prepare." : status,
 			);
 			statusLine.dataset.field = "status";
-			bar.append(prepare, statusLine);
+			bar.append(prepare);
+			if (add) bar.append(add);
+			bar.append(statusLine);
 			run.append(bar);
 			const error = create("p", "worktree-preparer__error", current.error ?? "");
 			error.dataset.field = "error";
