@@ -2655,12 +2655,10 @@ describe("vscode-editor: ~/.ssh/config parsing", () => {
 		]);
 	});
 
-	it("inherits a wildcard block as defaults without emitting it as a candidate", () => 
+	it("inherits a wildcard block as defaults without emitting it as a candidate", () =>
 		import("../../plugins/vscode-editor/src/index").then(({ parseSshConfig }) => {
 			const out = parseSshConfig(["Host *", "  User root", "  IdentityFile ~/.ssh/id_rsa", "", "Host box"].join("\n"));
-			expect(out).toEqual([
-				{ alias: "box", host: "box", port: 22, username: "root", privateKeyPath: "~/.ssh/id_rsa" },
-			]);
+			expect(out).toEqual([{ alias: "box", host: "box", port: 22, username: "root", privateKeyPath: "~/.ssh/id_rsa" }]);
 		}));
 
 	it("skips comments and wildcard aliases, honours = separators and quotes, and keeps the first value", async () => {
