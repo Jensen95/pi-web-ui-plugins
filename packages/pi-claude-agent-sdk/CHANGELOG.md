@@ -2,7 +2,7 @@
 
 ## UNRELEASED
 
-- **Add: multi-account profiles and usage commands** — select arbitrary named Claude/Codex accounts with `/claude-account`, inspect cached 5-hour and 7-day windows with `/claude-usage`, and configure account-scoped environment credentials or Codex auth files.
+- **Change: folder-backed Claude profiles** — each configured `profiles.<name>.claudeDir` registers a separate model-picker provider and runs only with that folder's manual Claude Code login. Removed account switching, Pi-auth credential injection, Codex usage lookup, and `/claude-account` / `/claude-usage`.
 
 ## 0.8.6 — 2026-09-01
 

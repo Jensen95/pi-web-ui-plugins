@@ -11,7 +11,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, write
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createRpcHarness, seedPiAnthropicAuth } from "./lib/rpc-harness.mjs";
+import { createRpcHarness, seedClaudeProfile } from "./lib/rpc-harness.mjs";
 
 const DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const BRIDGE_MODEL = "claude-bridge/claude-haiku-4-5";
@@ -22,7 +22,8 @@ const TEST_TIMEOUT = 240_000;
 const SUBAGENTS_SOURCE = "npm:@tintinweb/pi-subagents@0.14.3";
 const RPIV_LOCATOR_FIXTURE = resolve(DIR, "tests/fixtures/rpiv-pi-v0.6.0-agents/codebase-locator.md");
 const REENTRANT_MARKER = /provider: active query user-only call treated as reentrant fresh query/g;
-const STUCK_MARKER = /MCP handlers still waiting after delivering 0 results|tool handler\(s\) still waiting|currentPiStream overwritten/;
+const STUCK_MARKER =
+	/MCP handlers still waiting after delivering 0 results|tool handler\(s\) still waiting|currentPiStream overwritten/;
 assert.ok(existsSync(RPIV_LOCATOR_FIXTURE), `missing rpiv codebase-locator fixture: ${RPIV_LOCATOR_FIXTURE}`);
 
 const testAgentDir = mkdtempSync(join(tmpdir(), "subagent-rpiv-locator-dir-"));
@@ -30,9 +31,15 @@ const testProjectDir = mkdtempSync(join(tmpdir(), "subagent-rpiv-locator-project
 mkdirSync(join(testProjectDir, ".pi", "agents"), { recursive: true });
 mkdirSync(join(testProjectDir, "src"), { recursive: true });
 cpSync(RPIV_LOCATOR_FIXTURE, join(testProjectDir, ".pi", "agents", "codebase-locator.md"));
-writeFileSync(join(testProjectDir, "package.json"), JSON.stringify({ name: "subagent-rpiv-locator-fixture", private: true }, null, 2));
-writeFileSync(join(testProjectDir, "src", "rpiv_locator.ts"), "export const RPIV_LOCATOR_SENTINEL = 'rpiv-codebase-locator';\n");
-seedPiAnthropicAuth(testAgentDir);
+writeFileSync(
+	join(testProjectDir, "package.json"),
+	JSON.stringify({ name: "subagent-rpiv-locator-fixture", private: true }, null, 2),
+);
+writeFileSync(
+	join(testProjectDir, "src", "rpiv_locator.ts"),
+	"export const RPIV_LOCATOR_SENTINEL = 'rpiv-codebase-locator';\n",
+);
+seedClaudeProfile(testAgentDir);
 
 const harness = createRpcHarness({
 	name: "subagent-rpiv-codebase-locator",
@@ -45,7 +52,11 @@ const harness = createRpcHarness({
 const { startAndWait, stop, send, waitForEvent, waitForMatch, collectText, DEBUG_LOG, RPC_LOG } = harness;
 
 function debugLog() {
-	try { return readFileSync(DEBUG_LOG, "utf8"); } catch { return ""; }
+	try {
+		return readFileSync(DEBUG_LOG, "utf8");
+	} catch {
+		return "";
+	}
 }
 
 function reentrantCount() {
@@ -65,9 +76,10 @@ async function waitForReentrantCountAbove(count, label) {
 async function runAgentPrompt({ background, expectedMarker }) {
 	const beforeReentrant = reentrantCount();
 	const collector = collectText();
-	await send({
-		type: "prompt",
-		message: `Use the Agent tool exactly once.
+	await send(
+		{
+			type: "prompt",
+			message: `Use the Agent tool exactly once.
 
 Call it with:
 - subagent_type: codebase-locator
@@ -78,7 +90,9 @@ Call it with:
 - prompt: Find files related to RPIV_LOCATOR_SENTINEL in this repository. Return only file paths and matching line anchors. Do not ask questions.
 
 After the Agent tool returns, do not use more tools. ${background ? "Write 80 short numbered lines about keeping background work separate, then" : "Then"} reply exactly ${expectedMarker}.`,
-	}, TEST_TIMEOUT);
+		},
+		TEST_TIMEOUT,
+	);
 
 	await waitForMatch(
 		(msg) => msg.type === "tool_execution_start" && JSON.stringify(msg).includes("Agent"),
@@ -111,7 +125,9 @@ try {
 	console.log(`FAIL: ${err.message}\n${err.stack}`);
 	console.log(`  RPC log:    ${RPC_LOG}`);
 	console.log(`  Debug log:  ${DEBUG_LOG}`);
-	try { console.log(`  Debug tail:\n${readFileSync(DEBUG_LOG, "utf8").slice(-6000)}`); } catch {}
+	try {
+		console.log(`  Debug tail:\n${readFileSync(DEBUG_LOG, "utf8").slice(-6000)}`);
+	} catch {}
 } finally {
 	await stop();
 	rmSync(testAgentDir, { recursive: true, force: true });

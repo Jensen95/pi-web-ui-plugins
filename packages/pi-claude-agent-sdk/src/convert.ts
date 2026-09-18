@@ -2,7 +2,7 @@
 // Extracted so they can be tested without pulling in the full extension runtime.
 
 import type { Message as PiMessage } from "@earendil-works/pi-ai";
-import type { Message as SessionMessage } from "cc-session-io";
+import type { ContentBlock, Message as SessionMessage, ToolResultBlock, UserContentBlock } from "cc-session-io";
 import { pascalCase } from "change-case";
 import { createHash } from "node:crypto";
 import { MCP_TOOL_PREFIX } from "./skills.js";
@@ -12,7 +12,10 @@ export const PROVIDER_ID = "claude-bridge";
 // Pi tool names under Claude Code's builtin names. Used when conversion runs
 // without the provider's MCP tool map.
 export const PI_TO_SDK_TOOL_NAME: Record<string, string> = {
-	read: "Read", write: "Write", edit: "Edit", bash: "Bash",
+	read: "Read",
+	write: "Write",
+	edit: "Edit",
+	bash: "Bash",
 };
 
 const MAX_ANTHROPIC_TOOL_ID_LENGTH = 64;
@@ -79,8 +82,12 @@ export function messageContentToText(
 	const parts = [];
 	let hasText = false;
 	for (const block of content) {
-		if (block.type === "text" && block.text) { parts.push(block.text); hasText = true; }
-		else if (block.type !== "text" && block.type !== "image") { parts.push(`[${block.type}]`); }
+		if (block.type === "text" && block.text) {
+			parts.push(block.text);
+			hasText = true;
+		} else if (block.type !== "text" && block.type !== "image") {
+			parts.push(`[${block.type}]`);
+		}
 	}
 	return hasText ? parts.join("\n") : "";
 }
@@ -90,11 +97,11 @@ export function messageContentToText(
 // one keeps the block array shape instead (also what CC writes for screenshots).
 function toolResultContent(
 	content: string | Array<{ type: string; text?: string; data?: string; mimeType?: string }>,
-): string | Array<Record<string, unknown>> {
+): string | ContentBlock[] {
 	if (typeof content === "string" || !Array.isArray(content)) return messageContentToText(content) || "";
 	const images = content.filter((b) => b.type === "image" && b.data && b.mimeType);
 	if (!images.length) return messageContentToText(content) || "";
-	const blocks: Array<Record<string, unknown>> = [];
+	const blocks: ContentBlock[] = [];
 	for (const block of content) {
 		if (block.type === "text" && block.text) blocks.push({ type: "text", text: block.text });
 		else if (block.type === "image" && block.data && block.mimeType) {
@@ -126,9 +133,10 @@ export function convertPiMessages(
 	messages: PiMessage[],
 	customToolNameToSdk?: Map<string, string>,
 	dropThinking = false,
+	providerId = PROVIDER_ID,
 ): { anthropicMessages: SessionMessage[]; sanitizedIds: Map<string, string>; dropped: DroppedContent } {
-	const anthropicMessages = [];
-	const sanitizedIds = new Map();
+	const anthropicMessages: SessionMessage[] = [];
+	const sanitizedIds = new Map<string, string>();
 	// What conversion discarded. Nothing downstream can tell: a stripped thinking
 	// block and a message that never carried one convert to the same thing, so
 	// without this the loss is invisible in the log and in a captured request.
@@ -136,7 +144,7 @@ export function convertPiMessages(
 	// The user message collecting this assistant turn's tool results, if one has
 	// been emitted yet, and the index of the assistant message it belongs to. Both
 	// are cleared at every assistant message — see the toolResult branch.
-	let turnResults: { role: "user"; content: Array<Record<string, unknown>> } | null = null;
+	let turnResults: { role: "user"; content: ToolResultBlock[] } | null = null;
 	let turnAssistantIdx: number | null = null;
 
 	for (const msg of messages) {
@@ -144,7 +152,7 @@ export function convertPiMessages(
 			if (typeof msg.content === "string") {
 				anthropicMessages.push({ role: "user", content: msg.content || "[empty]" });
 			} else if (Array.isArray(msg.content)) {
-				const parts = [];
+				const parts: UserContentBlock[] = [];
 				for (const block of msg.content) {
 					if (block.type === "text" && block.text) parts.push({ type: "text", text: block.text });
 					else if (block.type === "image" && block.data && block.mimeType) {
@@ -157,7 +165,7 @@ export function convertPiMessages(
 			}
 		} else if (msg.role === "assistant") {
 			const content = Array.isArray(msg.content) ? msg.content : [];
-			const blocks = [];
+			const blocks: ContentBlock[] = [];
 			for (const block of content) {
 				if (block.type === "text" && block.text) {
 					blocks.push({ type: "text", text: block.text });
@@ -166,7 +174,7 @@ export function convertPiMessages(
 					// by any other provider — including pi's own Anthropic provider — is
 					// not ours to hand back, and Anthropic rejects ones it can't verify.
 					const sig = block.thinkingSignature;
-					if (!dropThinking && msg.provider === PROVIDER_ID && sig) {
+					if (!dropThinking && msg.provider === providerId && sig) {
 						blocks.push({ type: "thinking", thinking: block.thinking ?? "", signature: sig });
 					} else {
 						dropped.thinking++;
@@ -174,7 +182,12 @@ export function convertPiMessages(
 					}
 				} else if (block.type === "toolCall") {
 					const toolName = mapPiToolNameToSdk(block.name, customToolNameToSdk);
-					blocks.push({ type: "tool_use", id: sanitizeToolId(block.id, sanitizedIds), name: toolName, input: block.arguments ?? {} });
+					blocks.push({
+						type: "tool_use",
+						id: sanitizeToolId(block.id, sanitizedIds),
+						name: toolName,
+						input: block.arguments ?? {},
+					});
 				} else {
 					dropped.other.set(block.type, (dropped.other.get(block.type) ?? 0) + 1);
 				}
@@ -194,7 +207,10 @@ export function convertPiMessages(
 			// R_Y. repairToolPairing consumes both pending ids at the first one, stubs
 			// Y there and drops the real R_Y as unmatched, destroying the parallel
 			// result this merge exists to preserve. unit-import.mjs pins the shape.
-			if (!content.length) { dropped.abortedTurns++; continue; }
+			if (!content.length) {
+				dropped.abortedTurns++;
+				continue;
+			}
 			// Blocks were present but every one was filtered — content really was
 			// dropped here, so keep the slot and say so. Empty content is rejected by
 			// the API, and dropping the message would break tool pairing.
@@ -230,14 +246,23 @@ export function convertPiMessages(
 			// reorderAttachmentsForAPI (claude-code-rip src/utils/messages.ts:1481)
 			// bubbles attachments up to the nearest assistant or tool_result message
 			// and re-inserts them after it. The on-disk form differs, the order does not.
-			const block = { type: "tool_result", tool_use_id: sanitizeToolId(msg.toolCallId, sanitizedIds), content: toolResultContent(msg.content), is_error: msg.isError };
+			const block: ToolResultBlock = {
+				type: "tool_result",
+				tool_use_id: sanitizeToolId(msg.toolCallId, sanitizedIds),
+				content: toolResultContent(msg.content),
+				is_error: msg.isError,
+			};
 			if (turnResults) {
 				turnResults.content.push(block);
 			} else {
 				turnResults = { role: "user", content: [block] };
 				// A result with no assistant message before it is malformed history;
 				// appending keeps it in order for repairToolPairing to discard.
-				anthropicMessages.splice(turnAssistantIdx === null ? anthropicMessages.length : turnAssistantIdx + 1, 0, turnResults);
+				anthropicMessages.splice(
+					turnAssistantIdx === null ? anthropicMessages.length : turnAssistantIdx + 1,
+					0,
+					turnResults,
+				);
 			}
 		}
 	}

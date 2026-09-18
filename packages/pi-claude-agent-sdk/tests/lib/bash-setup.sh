@@ -25,7 +25,7 @@ __clean_path() {
 # Sets: DIR, LOGDIR, LOGFILE (if specified), DEBUG_LOG, and exports CLAUDE_BRIDGE_DEBUG
 setup_test_env() {
 	local name="$1"
-	local log_suffix="${2:-.log}"  # optional: suffix for logfile, or "none" for no logfile
+	local log_suffix="${2:-.log}" # optional: suffix for logfile, or "none" for no logfile
 
 	DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 	LOGDIR="$DIR/.test-output"
@@ -41,12 +41,21 @@ setup_test_env() {
 		LOGFILE=""
 	fi
 
+	# Register the manually logged-in Claude Code folder under the legacy default
+	# provider ID. The bridge ignores Pi auth and inherited Anthropic credentials.
+	local claude_dir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+	export PI_CODING_AGENT_DIR="$LOGDIR/${name}-agent"
+	rm -rf "$PI_CODING_AGENT_DIR"
+	mkdir -p "$PI_CODING_AGENT_DIR"
+	node -e 'const fs = require("fs"); fs.writeFileSync(process.argv[1], JSON.stringify({profiles:{default:{claudeDir:process.argv[2]}}}, null, 2) + "\n")' \
+		"$PI_CODING_AGENT_DIR/claude-bridge.json" "$claude_dir"
+
 	# Clean PATH and run pi from the project root so project-local config is visible.
 	PATH=$(__clean_path)
 	cd "$DIR"
 
 	# Export for use in tests
-	export DIR LOGDIR DEBUG_LOG LOGFILE PATH
+	export DIR LOGDIR DEBUG_LOG LOGFILE PATH PI_CODING_AGENT_DIR
 }
 
 # Kill all descendant processes (children, grandchildren, etc.).

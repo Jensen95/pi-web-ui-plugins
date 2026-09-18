@@ -6,7 +6,6 @@ import { spawn } from "node:child_process";
 import { createWriteStream, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { getClaudeDir } from "cc-session-io";
-import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { StringDecoder } from "node:string_decoder";
 
@@ -17,14 +16,16 @@ const DIR = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const ENV_FILE = resolve(DIR, ".env.test");
 if (existsSync(ENV_FILE)) process.loadEnvFile(ENV_FILE);
 
-/** Copy only Pi's Anthropic credential into an isolated test agent directory. */
-export function seedPiAnthropicAuth(targetAgentDir) {
-	const sourceAgentDir = process.env.PI_CODING_AGENT_DIR ?? resolve(homedir(), ".pi", "agent");
-	const sourcePath = resolve(sourceAgentDir, "auth.json");
-	const auth = JSON.parse(readFileSync(sourcePath, "utf8"));
-	if (!auth.anthropic) throw new Error(`Integration tests require an Anthropic credential in Pi (${sourcePath})`);
+/** Register one manually logged-in Claude Code folder for an isolated test agent dir. */
+export function seedClaudeProfile(targetAgentDir, profileName = "default", claudeDir = CLAUDE_DIR) {
 	mkdirSync(targetAgentDir, { recursive: true });
-	writeFileSync(resolve(targetAgentDir, "auth.json"), `${JSON.stringify({ anthropic: auth.anthropic }, null, 2)}\n`, { mode: 0o600 });
+	const path = resolve(targetAgentDir, "claude-bridge.json");
+	const existing = existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : {};
+	writeFileSync(
+		path,
+		`${JSON.stringify({ ...existing, profiles: { ...existing.profiles, [profileName]: { claudeDir } } }, null, 2)}\n`,
+		{ mode: 0o600 },
+	);
 }
 
 // Claude Code persists session state under its config dir. A sandbox that blocks
@@ -70,9 +71,16 @@ export function createRpcHarness(opts) {
 
 	const RPC_LOG = `${LOGDIR}/${name}.log`;
 	const DEBUG_LOG = `${LOGDIR}/${name}-debug.log`;
+	const agentDir = env.PI_CODING_AGENT_DIR ?? `${LOGDIR}/${name}-agent`;
+	if (!env.PI_CODING_AGENT_DIR) {
+		rmSync(agentDir, { recursive: true, force: true });
+		seedClaudeProfile(agentDir, "default", env.CLAUDE_CONFIG_DIR ?? CLAUDE_DIR);
+	}
 
 	// Strip any local node_modules from PATH so we use the globally-installed `pi`.
-	const cleanPath = process.env.PATH.split(":").filter((p) => !p.includes("node_modules")).join(":");
+	const cleanPath = process.env.PATH.split(":")
+		.filter((p) => !p.includes("node_modules"))
+		.join(":");
 
 	let pi, rpcLog;
 	let stopped = false;
@@ -91,12 +99,21 @@ export function createRpcHarness(opts) {
 		pi = spawn("pi", spawnArgs, {
 			cwd,
 			stdio: ["pipe", "pipe", "pipe"],
-			env: { ...process.env, PATH: cleanPath, CLAUDE_BRIDGE_DEBUG: "1", CLAUDE_BRIDGE_DEBUG_PATH: DEBUG_LOG, ...env },
+			env: {
+				...process.env,
+				PATH: cleanPath,
+				CLAUDE_BRIDGE_DEBUG: "1",
+				CLAUDE_BRIDGE_DEBUG_PATH: DEBUG_LOG,
+				PI_CODING_AGENT_DIR: agentDir,
+				...env,
+			},
 		});
 
 		// The killed subprocess can still flush buffered stdout/stderr after stop()
 		// has ended rpcLog; guard writes so teardown doesn't throw write-after-end.
-		pi.stderr.on("data", (d) => { if (!stopped) rpcLog.write(d); });
+		pi.stderr.on("data", (d) => {
+			if (!stopped) rpcLog.write(d);
+		});
 
 		const decoder = new StringDecoder("utf8");
 		pi.stdout.on("data", (chunk) => {
@@ -151,7 +168,8 @@ export function createRpcHarness(opts) {
 				if (msg.type !== "response" || msg.id !== id) return;
 				clearTimeout(timer);
 				remove();
-				msg.success ? resolve(msg.data) : reject(new Error(`${cmd.type}: ${msg.error}`));
+				if (msg.success) resolve(msg.data);
+				else reject(new Error(`${cmd.type}: ${msg.error}`));
 			});
 		});
 	}
@@ -191,7 +209,13 @@ export function createRpcHarness(opts) {
 			}
 		};
 		addListener(handler);
-		return { stop() { const i = listeners.indexOf(handler); if (i !== -1) listeners.splice(i, 1); return text; } };
+		return {
+			stop() {
+				const i = listeners.indexOf(handler);
+				if (i !== -1) listeners.splice(i, 1);
+				return text;
+			},
+		};
 	}
 
 	async function promptAndWait(message, timeout = defaultTimeout) {

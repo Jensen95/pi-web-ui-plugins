@@ -18,6 +18,8 @@ export interface PendingToolCall {
 export class QueryContext {
 	// Query-scoped (fully isolated per query)
 	activeQuery: unknown | null = null;
+	/** Provider profile that owns this query and its Claude Code session. */
+	profileId: string | null = null;
 	currentPiStream: AssistantMessageEventStream | null = null;
 	latestCursor = 0;
 	pendingToolCalls = new Map<string, PendingToolCall>();
@@ -52,18 +54,29 @@ export class QueryContext {
 	 *  still a reply, and a handler left awaiting a subprocess that is gone keeps
 	 *  CC's tools/call open forever, which wedges pi's turn behind it. */
 	releasePendingToolCalls(reason: string): void {
-		for (const pending of this.pendingToolCalls.values()) pending.resolve({ content: [{ type: "text", text: reason }] });
+		for (const pending of this.pendingToolCalls.values())
+			pending.resolve({ content: [{ type: "text", text: reason }] });
 		this.pendingToolCalls.clear();
 		this.pendingResults.clear();
 	}
 
 	resetTurnState(model: Model<any>): void {
 		this.turnOutput = {
-			role: "assistant", content: [],
-			api: model.api, provider: model.provider, model: model.id,
-			usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
-				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
-			stopReason: "stop", timestamp: Date.now(),
+			role: "assistant",
+			content: [],
+			api: model.api,
+			provider: model.provider,
+			model: model.id,
+			usage: {
+				input: 0,
+				output: 0,
+				cacheRead: 0,
+				cacheWrite: 0,
+				totalTokens: 0,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+			},
+			stopReason: "stop",
+			timestamp: Date.now(),
 		};
 		this.turnStarted = false;
 		this.turnSawStreamEvent = false;
@@ -76,7 +89,9 @@ export class QueryContext {
 
 let _ctx = new QueryContext();
 
-export function ctx(): QueryContext { return _ctx; }
+export function ctx(): QueryContext {
+	return _ctx;
+}
 
 // Test-only: replace the module-level context so test files start clean.
 // Not called from production.

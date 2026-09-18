@@ -8,14 +8,14 @@
 import { readFileSync, rmSync, writeFileSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createRpcHarness, seedPiAnthropicAuth } from "./lib/rpc-harness.mjs";
+import { createRpcHarness, seedClaudeProfile } from "./lib/rpc-harness.mjs";
 
 const TIMEOUT = 120_000;
 const BRIDGE_MODEL = "claude-bridge/claude-haiku-4-5";
 
 const testAgentDir = mkdtempSync(join(tmpdir(), "served-window-agent-"));
 writeFileSync(join(testAgentDir, "settings.json"), JSON.stringify({}));
-seedPiAnthropicAuth(testAgentDir);
+seedClaudeProfile(testAgentDir);
 
 const harness = createRpcHarness({
 	name: "served-window",
@@ -55,7 +55,9 @@ try {
 	const served = Number(line.match(/served contextWindow=(\d+)/)[1]);
 	const registered = Number(line.match(/registered=(\d+)/)[1]);
 	if (served !== registered) {
-		throw new Error(`served contextWindow (${served}) != registered (${registered}); pi's compaction threshold is out of sync with the CC window.\n  ${line.trim()}`);
+		throw new Error(
+			`served contextWindow (${served}) != registered (${registered}); pi's compaction threshold is out of sync with the CC window.\n  ${line.trim()}`,
+		);
 	}
 
 	console.log("PASS");

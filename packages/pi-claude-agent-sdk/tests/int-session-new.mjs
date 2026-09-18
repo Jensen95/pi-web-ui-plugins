@@ -25,7 +25,9 @@ await startAndWait();
 
 try {
 	console.log("Turn 1: seed history...");
-	await promptAndWait("Pick a number between 1 and 100 and remember it. Reply with just the number. Do not use the memory system.");
+	await promptAndWait(
+		"Pick a number between 1 and 100 and remember it. Reply with just the number. Do not use the memory system.",
+	);
 	console.log("Turn 2: more history...");
 	await promptAndWait("Now pick a color. Reply with just the color. Do not use the memory system.");
 
@@ -40,10 +42,9 @@ try {
 	const fullLog = readFileSync(DEBUG_LOG, "utf8");
 	const postNewLog = fullLog.slice(NEW_MARKER_LOG);
 
-	// The bridge logs `session_start:new: clearing session ...` when it
-	// observes the event. Make sure we saw it.
-	if (!/session_start:new: clearing session/.test(postNewLog)) {
-		throw new Error("no `session_start:new: clearing session` marker — bridge didn't observe /new");
+	// The bridge logs its profile-session reset when it observes /new.
+	if (!/session_start:new: clearing \d+ Claude session\(s\)/.test(postNewLog)) {
+		throw new Error("no profile-session reset marker — bridge didn't observe /new");
 	}
 
 	// First syncResult after /new must be clean-start (sharedSession=null,
@@ -56,7 +57,8 @@ try {
 	if (syncResults[0] !== "clean-start") {
 		throw new Error(
 			`bridge took ${syncResults[0]} path after /new — expected clean-start.\n` +
-			`       sharedSession should be cleared by the session_start:new handler.`);
+				`       sharedSession should be cleared by the session_start:new handler.`,
+		);
 	}
 
 	console.log("PASS");

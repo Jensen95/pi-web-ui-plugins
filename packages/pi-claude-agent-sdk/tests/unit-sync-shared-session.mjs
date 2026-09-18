@@ -10,10 +10,13 @@ import { join } from "node:path";
 import { createSession, deleteSession, openSession } from "cc-session-io";
 
 const { __test } = await import("../src/index.js");
+const PROFILE_ID = "claude-bridge-test";
+const profileFor = (claudeDir) => ({ name: "test", providerId: PROFILE_ID, claudeDir });
 
 describe("syncSharedSession", () => {
 	afterEach(() => {
 		__test.resetSharedSession();
+		__test.resetSharedSession(PROFILE_ID);
 		__test.setPiUI(null);
 	});
 
@@ -25,21 +28,29 @@ describe("syncSharedSession", () => {
 	// covered for a case that never happens.
 	it("starts a fresh session for a shorter context and preserves the parent's", () => {
 		const cwd = mkdtempSync(join(tmpdir(), "sync-shared-session-"));
+		const claudeDir = mkdtempSync(join(tmpdir(), "sync-shared-session-cfg-"));
+		const profile = profileFor(claudeDir);
 		try {
 			const mainSession = {
 				sessionId: "11111111-1111-4111-8111-111111111111",
 				cursor: 42,
 				cwd,
 			};
-			__test.setSharedSession(mainSession);
+			__test.setSharedSession(mainSession, PROFILE_ID);
 
-			const result = __test.syncSharedSession([
-				{
-					role: "user",
-					content: "Summarize this conversation.",
-					timestamp: Date.now(),
-				},
-			], cwd);
+			const result = __test.syncSharedSession(
+				[
+					{
+						role: "user",
+						content: "Summarize this conversation.",
+						timestamp: Date.now(),
+					},
+				],
+				cwd,
+				undefined,
+				undefined,
+				profile,
+			);
 
 			assert.equal(
 				result.sessionId,
@@ -51,9 +62,10 @@ describe("syncSharedSession", () => {
 				true,
 				"the fresh session must not replace the parent's when it completes",
 			);
-			assert.deepEqual(__test.getSharedSession(), mainSession);
+			assert.deepEqual(__test.getSharedSession(PROFILE_ID), mainSession);
 		} finally {
 			rmSync(cwd, { recursive: true, force: true });
+			rmSync(claudeDir, { recursive: true, force: true });
 		}
 	});
 
@@ -63,46 +75,57 @@ describe("syncSharedSession", () => {
 	// that their session was corrupt, and asked them to open an issue about it.
 	it("does not report a count mismatch when a rebuild carries an attachment", () => {
 		const cwd = mkdtempSync(join(tmpdir(), "sync-shared-session-"));
+		const claudeDir = mkdtempSync(join(tmpdir(), "sync-shared-session-cfg-"));
+		const profile = profileFor(claudeDir);
 		const sessionId = randomUUID();
 		const prompt = "Review @fixture.txt and remember it.";
 		const notices = [];
 		try {
-			const seeded = createSession({ sessionId, projectPath: cwd });
+			const seeded = createSession({ sessionId, projectPath: cwd, claudeDir });
 			seeded.importMessages(
 				[
 					{ role: "user", content: prompt },
 					{ role: "assistant", content: [{ type: "text", text: "Noted." }] },
 				],
 				{
-					attachments: [{
-						afterIndex: 0,
-						attachment: {
-							type: "file",
-							filename: join(cwd, "fixture.txt"),
-							content: { type: "text", file: { filePath: join(cwd, "fixture.txt"), content: "token" } },
+					attachments: [
+						{
+							afterIndex: 0,
+							attachment: {
+								type: "file",
+								filename: join(cwd, "fixture.txt"),
+								content: { type: "text", file: { filePath: join(cwd, "fixture.txt"), content: "token" } },
+							},
 						},
-					}],
+					],
 				},
 			);
 			seeded.save();
 
-			__test.setSharedSession({ sessionId, cursor: 0, cwd });
+			__test.setSharedSession({ sessionId, cursor: 0, cwd }, PROFILE_ID);
 			__test.setPiUI({ notify: (message) => notices.push(message) });
-			__test.syncSharedSession([
-				{ role: "user", content: prompt, timestamp: Date.now() },
-				{ role: "assistant", content: [{ type: "text", text: "Noted." }], timestamp: Date.now() },
-				{ role: "user", content: "Now what did it say?", timestamp: Date.now() },
-			], cwd);
+			__test.syncSharedSession(
+				[
+					{ role: "user", content: prompt, timestamp: Date.now() },
+					{ role: "assistant", content: [{ type: "text", text: "Noted." }], timestamp: Date.now() },
+					{ role: "user", content: "Now what did it say?", timestamp: Date.now() },
+				],
+				cwd,
+				undefined,
+				undefined,
+				profile,
+			);
 
 			assert.equal(
-				openSession({ sessionId, projectPath: cwd }).attachments.length,
+				openSession({ sessionId, projectPath: cwd, claudeDir }).attachments.length,
 				1,
 				"the rebuild did not carry the attachment, so this proves nothing about the count",
 			);
 			assert.deepEqual(notices, []);
 		} finally {
-			deleteSession(sessionId, cwd);
+			deleteSession(sessionId, cwd, claudeDir);
 			rmSync(cwd, { recursive: true, force: true });
+			rmSync(claudeDir, { recursive: true, force: true });
 		}
 	});
 });

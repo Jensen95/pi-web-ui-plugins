@@ -8,20 +8,17 @@
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createRpcHarness, seedPiAnthropicAuth } from "./lib/rpc-harness.mjs";
+import { createRpcHarness, seedClaudeProfile } from "./lib/rpc-harness.mjs";
 
 const TIMEOUT = 180_000;
 const BRIDGE_MODEL = process.env.BRIDGE_TEST_MODEL ?? "claude-bridge/claude-haiku-4-5";
 const testAgentDir = mkdtempSync(join(tmpdir(), "standalone-complete-agent-"));
 const resultPath = join(testAgentDir, "result.json");
-seedPiAnthropicAuth(testAgentDir);
+seedClaudeProfile(testAgentDir);
 
 const harness = createRpcHarness({
 	name: "standalone-complete",
-	args: [
-		"-e", "./tests/fixtures/standalone-complete-extension.ts",
-		"--model", BRIDGE_MODEL,
-	],
+	args: ["-e", "./tests/fixtures/standalone-complete-extension.ts", "--model", BRIDGE_MODEL],
 	env: {
 		PI_CODING_AGENT_DIR: testAgentDir,
 		STANDALONE_COMPLETE_RESULT: resultPath,
@@ -39,9 +36,15 @@ try {
 	await send({ type: "prompt", message: "/probe-standalone-complete" }, TIMEOUT);
 	const nested = JSON.parse(readFileSync(resultPath, "utf8"));
 	if (nested.stopReason !== "stop") {
-		throw new Error(`nested completion failed: ${JSON.stringify({ stopReason: nested.stopReason, errorMessage: nested.errorMessage })}`);
+		throw new Error(
+			`nested completion failed: ${JSON.stringify({ stopReason: nested.stopReason, errorMessage: nested.errorMessage })}`,
+		);
 	}
-	const nestedText = nested.content?.filter((part) => part.type === "text").map((part) => part.text).join("") ?? "";
+	const nestedText =
+		nested.content
+			?.filter((part) => part.type === "text")
+			.map((part) => part.text)
+			.join("") ?? "";
 	if (!/STANDALONE-OK/.test(nestedText)) throw new Error(`unexpected nested output: ${nestedText}`);
 
 	const after = await promptAndWait('Reply with exactly "after-ok". Do not use tools.');
@@ -57,7 +60,9 @@ try {
 	const established = log.match(/provider: query done, session=([0-9a-f]+)/)?.[1];
 	const resumed = log.match(/syncResult: path=reuse sessionId=([0-9a-f-]+)/)?.[1];
 	if (!established || !resumed) {
-		throw new Error(`expected an established and resumed chat session, got established=${established} resumed=${resumed}`);
+		throw new Error(
+			`expected an established and resumed chat session, got established=${established} resumed=${resumed}`,
+		);
 	}
 	if (!resumed.startsWith(established)) {
 		throw new Error(`standalone call changed chat session: ${established} -> ${resumed}`);

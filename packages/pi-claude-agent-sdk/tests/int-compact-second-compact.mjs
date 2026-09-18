@@ -5,7 +5,7 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createRpcHarness, seedPiAnthropicAuth } from "./lib/rpc-harness.mjs";
+import { createRpcHarness, seedClaudeProfile } from "./lib/rpc-harness.mjs";
 
 const TIMEOUT = 180_000;
 const BRIDGE_MODEL = "claude-bridge/claude-haiku-4-5";
@@ -13,10 +13,13 @@ const BRIDGE_MODEL = "claude-bridge/claude-haiku-4-5";
 // Force each /compact to discard older turns instead of summarizing an empty
 // prefix while preserving all recent context.
 const testAgentDir = mkdtempSync(join(tmpdir(), "compact-second-agent-"));
-writeFileSync(join(testAgentDir, "settings.json"), JSON.stringify({
-	compaction: { keepRecentTokens: 50 },
-}));
-seedPiAnthropicAuth(testAgentDir);
+writeFileSync(
+	join(testAgentDir, "settings.json"),
+	JSON.stringify({
+		compaction: { keepRecentTokens: 50 },
+	}),
+);
+seedClaudeProfile(testAgentDir);
 
 const harness = createRpcHarness({
 	name: "compact-second-compact",
@@ -34,14 +37,8 @@ function assertMentions(summary, file) {
 }
 
 async function forceDiscardableHistory(file, marker) {
-	await promptAndWait(
-		`Use the read tool to read ${file}. Then reply with exactly '${marker}'.`,
-		TIMEOUT,
-	);
-	await promptAndWait(
-		"List 15 European capital cities, one per line, numbered. Nothing else.",
-		TIMEOUT,
-	);
+	await promptAndWait(`Use the read tool to read ${file}. Then reply with exactly '${marker}'.`, TIMEOUT);
+	await promptAndWait("List 15 European capital cities, one per line, numbered. Nothing else.", TIMEOUT);
 }
 
 await startAndWait();
@@ -70,7 +67,9 @@ try {
 	console.log(`FAIL: ${e.message}\n${e.stack}`);
 	console.log(`  RPC log:    ${RPC_LOG}`);
 	console.log(`  Debug log:  ${DEBUG_LOG}`);
-	try { console.log(`  Debug tail: ${readFileSync(DEBUG_LOG, "utf8").slice(-3000)}`); } catch {}
+	try {
+		console.log(`  Debug tail: ${readFileSync(DEBUG_LOG, "utf8").slice(-3000)}`);
+	} catch {}
 } finally {
 	await stop();
 	rmSync(testAgentDir, { recursive: true, force: true });

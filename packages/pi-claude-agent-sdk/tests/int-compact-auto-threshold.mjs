@@ -9,17 +9,20 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createRpcHarness, seedPiAnthropicAuth } from "./lib/rpc-harness.mjs";
+import { createRpcHarness, seedClaudeProfile } from "./lib/rpc-harness.mjs";
 
 const BRIDGE_MODEL = "claude-bridge/claude-haiku-4-5";
 const COMPACT_TIMEOUT = 120_000;
 const TEST_TIMEOUT = 240_000;
 
 const testAgentDir = mkdtempSync(join(tmpdir(), "compact-auto-agent-"));
-writeFileSync(join(testAgentDir, "settings.json"), JSON.stringify({
-	compaction: { enabled: false, reserveTokens: 198000, keepRecentTokens: 50 },
-}));
-seedPiAnthropicAuth(testAgentDir);
+writeFileSync(
+	join(testAgentDir, "settings.json"),
+	JSON.stringify({
+		compaction: { enabled: false, reserveTokens: 198000, keepRecentTokens: 50 },
+	}),
+);
+seedClaudeProfile(testAgentDir);
 
 const harness = createRpcHarness({
 	name: "compact-auto-threshold",
@@ -102,12 +105,21 @@ try {
 	const endEvent = await endPromise;
 	const answer = await answerPromise;
 
-	assert(thresholdStarts.length === 1, `expected exactly one threshold compaction_start, got ${thresholdStarts.length}`);
+	assert(
+		thresholdStarts.length === 1,
+		`expected exactly one threshold compaction_start, got ${thresholdStarts.length}`,
+	);
 	assert(thresholdEnds.length === 1, `expected exactly one threshold compaction_end, got ${thresholdEnds.length}`);
 	assert(endEvent.aborted === false, `threshold compaction aborted: ${JSON.stringify(endEvent)}`);
 	assert(endEvent.result?.summary?.trim(), `threshold compaction returned empty summary: ${JSON.stringify(endEvent)}`);
-	assert(endEvent.result?.firstKeptEntryId, `threshold compaction returned no firstKeptEntryId: ${JSON.stringify(endEvent)}`);
-	assert((endEvent.result?.tokensBefore ?? 0) > 0, `threshold compaction returned invalid tokensBefore: ${JSON.stringify(endEvent)}`);
+	assert(
+		endEvent.result?.firstKeptEntryId,
+		`threshold compaction returned no firstKeptEntryId: ${JSON.stringify(endEvent)}`,
+	);
+	assert(
+		(endEvent.result?.tokensBefore ?? 0) > 0,
+		`threshold compaction returned invalid tokensBefore: ${JSON.stringify(endEvent)}`,
+	);
 	assert(
 		/Turn Context \(split turn\)/.test(endEvent.result.summary),
 		`threshold compaction summary lacks split-turn marker. Summary head: ${endEvent.result.summary.slice(0, 500)}`,
@@ -132,7 +144,9 @@ try {
 	assert(thresholdEnds.length === 1, `second threshold compaction_end fired (${thresholdEnds.length} total)`);
 
 	const debugLog = readFileSync(DEBUG_LOG, "utf8");
-	const standaloneRoutes = [...debugLog.matchAll(/routing standalone cacheRetention=none request to isolated subprocess/g)].length;
+	const standaloneRoutes = [
+		...debugLog.matchAll(/routing standalone cacheRetention=none request to isolated subprocess/g),
+	].length;
 	assert(standaloneRoutes >= 2, `expected at least 2 standalone summary routes, got ${standaloneRoutes}`);
 	const standaloneSpawns = [...debugLog.matchAll(/standalone: spawn/g)].length;
 	assert(standaloneSpawns >= 2, `expected at least 2 standalone summary spawns, got ${standaloneSpawns}`);
@@ -147,7 +161,9 @@ try {
 	console.log(`FAIL: ${e.message}\n${e.stack}`);
 	console.log(`  RPC log:    ${RPC_LOG}`);
 	console.log(`  Debug log:  ${DEBUG_LOG}`);
-	try { console.log(`  Debug tail: ${readFileSync(DEBUG_LOG, "utf8").slice(-4000)}`); } catch {}
+	try {
+		console.log(`  Debug tail: ${readFileSync(DEBUG_LOG, "utf8").slice(-4000)}`);
+	} catch {}
 } finally {
 	await stop();
 	rmSync(testAgentDir, { recursive: true, force: true });

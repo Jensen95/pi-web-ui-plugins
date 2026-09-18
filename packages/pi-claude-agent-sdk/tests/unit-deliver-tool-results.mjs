@@ -34,7 +34,9 @@ function makeRecorder() {
 					}
 					// Ack on a later turn of the event loop: resolving synchronously
 					// would let a caller that forgot to await it still look correct.
-					return new Promise((resolve) => setTimeout(resolve, 5)).then(() => { order.push("ack"); });
+					return new Promise((resolve) => setTimeout(resolve, 5)).then(() => {
+						order.push("ack");
+					});
 				},
 			};
 		},
@@ -46,8 +48,12 @@ function makeRecorder() {
 
 const steerText = [{ type: "text", text: "actually stop" }];
 const result = (toolCallId) => ({ toolCallId, content: [{ type: "text", text: "ok" }] });
+const TEST_PROFILE = "claude-bridge-personal";
 
-beforeEach(() => __test.resetSharedSession());
+beforeEach(() => {
+	__test.resetSharedSession();
+	__test.resetSharedSession(TEST_PROFILE);
+});
 
 describe("deliverToolResults", () => {
 	it("writes the steer to stdin before releasing any tool result", async () => {
@@ -65,7 +71,12 @@ describe("deliverToolResults", () => {
 	it("sends the steer with priority next so CC drains it at the tool boundary", async () => {
 		const sent = [];
 		const c = new QueryContext();
-		c.promptStream = { push: (msg) => { sent.push(msg); return Promise.resolve(); } };
+		c.promptStream = {
+			push: (msg) => {
+				sent.push(msg);
+				return Promise.resolve();
+			},
+		};
 		c.pendingToolCalls.set("call-1", { toolName: "read", resolve: () => {} });
 
 		await __test.deliverToolResults(c, [result("call-1")], steerText, 4);
@@ -78,7 +89,12 @@ describe("deliverToolResults", () => {
 	it("keeps image blocks in the steer", async () => {
 		const sent = [];
 		const c = new QueryContext();
-		c.promptStream = { push: (msg) => { sent.push(msg); return Promise.resolve(); } };
+		c.promptStream = {
+			push: (msg) => {
+				sent.push(msg);
+				return Promise.resolve();
+			},
+		};
 		const withImage = [
 			{ type: "text", text: "look at this" },
 			{ type: "image", source: { type: "base64", media_type: "image/png", data: "iVBOR" } },
@@ -94,24 +110,26 @@ describe("deliverToolResults", () => {
 	it("marks the session for rebuild when the push is rejected, and still delivers results", async () => {
 		const rec = makeRecorder();
 		const c = new QueryContext();
+		c.profileId = TEST_PROFILE;
 		c.promptStream = rec.promptStream("reject");
 		c.pendingToolCalls.set("call-1", rec.handler("read"));
-		__test.setSharedSession({ sessionId: "abc", cursor: 3, cwd: "/tmp", needsRebuild: false });
+		__test.setSharedSession({ sessionId: "abc", cursor: 3, cwd: "/tmp", needsRebuild: false }, TEST_PROFILE);
 
 		await __test.deliverToolResults(c, [result("call-1")], steerText, 4);
 
 		assert.deepStrictEqual(rec.order, ["push:actually stop", "push-rejected", "resolve:read"]);
-		assert.equal(__test.getSharedSession().needsRebuild, true);
+		assert.equal(__test.getSharedSession(TEST_PROFILE).needsRebuild, true);
 	});
 
 	it("marks the session for rebuild when there is no prompt stream", async () => {
 		const c = new QueryContext();
+		c.profileId = TEST_PROFILE;
 		c.promptStream = null;
-		__test.setSharedSession({ sessionId: "abc", cursor: 3, cwd: "/tmp", needsRebuild: false });
+		__test.setSharedSession({ sessionId: "abc", cursor: 3, cwd: "/tmp", needsRebuild: false }, TEST_PROFILE);
 
 		await __test.deliverToolResults(c, [], steerText, 4);
 
-		assert.equal(__test.getSharedSession().needsRebuild, true);
+		assert.equal(__test.getSharedSession(TEST_PROFILE).needsRebuild, true);
 	});
 
 	it("queues a result whose handler has not arrived yet", async () => {

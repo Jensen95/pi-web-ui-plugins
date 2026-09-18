@@ -34,13 +34,22 @@ plugin-marketplace list, so the two must not drift.
 
 ## Claude provider package
 
-`packages/pi-claude-agent-sdk` registers Claude Code as a pi model provider. Install it directly with:
+`packages/pi-claude-agent-sdk` registers Claude Code as a pi model provider. Install a published release with:
 
 ```sh
 pi install npm:pi-claude-agent-sdk
 ```
 
-It supports arbitrary named Claude/Codex accounts, account switching with `/claude-account`, and cached 5-hour/7-day usage reporting with `/claude-usage`. See [`packages/pi-claude-agent-sdk/README.md`](packages/pi-claude-agent-sdk/README.md) for account configuration and authentication details.
+Or install this checkout before it is published:
+
+```sh
+npm install
+pi install "$PWD/packages/pi-claude-agent-sdk"
+```
+
+Use `pi install -l "$PWD/packages/pi-claude-agent-sdk"` for a project-local install.
+
+Configure named Claude Code folder profiles; each appears as its own model-picker provider and uses its own manual Claude Code login. See [`packages/pi-claude-agent-sdk/README.md`](packages/pi-claude-agent-sdk/README.md) for profile configuration and authentication details.
 
 ## Browser extension
 

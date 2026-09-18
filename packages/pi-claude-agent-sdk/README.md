@@ -15,17 +15,28 @@ Use Opus/Sonnet/Haiku as models in pi, with all tool calls flowing through pi's 
 
 ## Install
 
-```
+Published release:
+
+```sh
 pi install npm:pi-claude-agent-sdk
 ```
 
+From this checkout (before publishing, run from the repository root):
+
+```sh
+npm install
+pi install "$PWD/packages/pi-claude-agent-sdk"
+```
+
+Use `pi install -l "$PWD/packages/pi-claude-agent-sdk"` to install it only for the current project.
+
 ## Provider
 
-Use `/model` to select `claude-bridge/claude-fable-5-1`, `claude-bridge/claude-fable-5`, `claude-bridge/claude-opus-5`, `claude-bridge/claude-opus-4-8`, `claude-bridge/claude-opus-4-7`, `claude-bridge/claude-opus-4-6`, `claude-bridge/claude-sonnet-5`, `claude-bridge/claude-sonnet-4-6`, or `claude-bridge/claude-haiku-4-5`. The `fable` shortcut resolves to Fable 5.1. Fable 5.1 needs Claude Code **2.1.251 or newer** (the SDK's bundled CLI is 2.1.257). If you point `provider.pathToClaudeCodeExecutable` at an older binary, or a later model outruns the bundle, the bridge uses a current `claude` on PATH when it finds one.
+Each configured profile appears as its own `/model` provider. For example, `personal` supplies `claude-bridge-personal/claude-fable-5-1` and `work` supplies `claude-bridge-work/claude-fable-5-1`; a profile named `default` keeps the original `claude-bridge/...` IDs. The `fable` shortcut resolves to Fable 5.1. Fable 5.1 needs Claude Code **2.1.251 or newer** (the SDK's bundled CLI is 2.1.257). If you point `provider.pathToClaudeCodeExecutable` at an older binary, or a later model outruns the bundle, the bridge uses a current `claude` on PATH when it finds one.
 
 Behind the scenes, pi's tools are bridged to Claude Code but it should all work like normal in pi. Bash commands get a 120-second default timeout (matching Claude Code's default) since pi's bash has no timeout by default. Skills in pi are copied over to Claude Code's system prompt so should work as they would with any other pi provider. Steering works mid-turn: a message sent while Claude is running a tool reaches it at that tool boundary, not after the whole turn finishes.
 
-**Authentication:** the bridge requires an Anthropic OAuth credential (or API key) configured in Pi and uses Pi's normal token refresh. Claude Code login and inherited Claude/Anthropic authentication settings are deliberately ignored, so configure Anthropic authentication in Pi before using the provider.
+**Authentication:** each provider uses only its configured Claude Code folder. Log into every folder yourself before starting pi; the bridge strips inherited Anthropic/Claude credential and backend environment variables, then starts Claude Code with that profile's `CLAUDE_CONFIG_DIR`.
 
 **1M Context:** Fable 5.1, Fable 5, Opus 5, Opus 4.8, and Opus 4.7 get 1M context by default. Opus 4.6 only gets 1M if you're on a Max plan or pay for Extra Usage. Sonnet 4.6 only gets 1M if you pay for Extra Usage. You will need to set `provider.plan` and/or `provider.longContextExtraUsage` for 1M context in Opus 4.6/Sonnet 4.6 as described in [Configuration](#configuration).
 
@@ -35,6 +46,10 @@ Config: `~/.pi/agent/claude-bridge.json` (global) or the project Pi config direc
 
 ```json
 {
+	"profiles": {
+		"personal": { "claudeDir": "~/.claude-personal" },
+		"work": { "claudeDir": "~/.claude-work" }
+	},
 	"provider": {
 		"plan": "max",
 		"longContextExtraUsage": false,
@@ -54,33 +69,18 @@ Config: `~/.pi/agent/claude-bridge.json` (global) or the project Pi config direc
 
 **Extension providers and models.json:** pi's `modelOverrides` in `~/.pi/agent/models.json` do not currently apply to extension-registered providers (like claude-bridge). Overriding `contextWindow` or other fields requires editing `src/models.ts` directly.
 
-### Multiple accounts and usage
+### Profiles
 
-Use `activeAccount` plus any number of named `accounts`. Global and project config merge by account name. Credentials stay in environment variables or Pi's auth registry; they are never written by this extension.
+`profiles` maps a profile name to a distinct, absolute Claude Code folder. Global and project configuration merge by profile name. Profile names use lowercase letters, digits, and hyphens; `default` maps to `claude-bridge`, and every other name maps to `claude-bridge-<name>`.
 
-```json
-{
-	"activeAccount": "work",
-	"accounts": {
-		"personal": {
-			"anthropic": { "authProvider": "anthropic-personal" },
-			"codex": { "authFile": "~/.codex-personal/auth.json" }
-		},
-		"work": {
-			"anthropic": { "tokenEnv": "WORK_ANTHROPIC_OAUTH_TOKEN" },
-			"codex": {
-				"accessTokenEnv": "WORK_CODEX_TOKEN",
-				"accountIdEnv": "WORK_CODEX_ACCOUNT_ID"
-			}
-		}
-	}
-}
+Log into each folder before using pi:
+
+```sh
+CLAUDE_CONFIG_DIR="$HOME/.claude-personal" claude
+CLAUDE_CONFIG_DIR="$HOME/.claude-work" claude
 ```
 
-- `anthropic.authProvider` selects a Pi auth provider. `tokenEnv` selects an OAuth token; use `apiKeyEnv` for an API key instead.
-- `codex` reads `accessTokenEnv` or the Codex `auth.json` file (`$CODEX_HOME/auth.json`, then `~/.codex/auth.json`). `accountIdEnv` is optional.
-- `/claude-account <name>` switches the active account for new provider turns and clears the shared Claude session. `/claude-usage [name]` reports the latest 5-hour and 7-day windows returned by Claude's SDK usage control API; run a Claude turn first to populate the account snapshot.
-- Codex usage uses OpenAI's internal ChatGPT/WHAM usage endpoint by default; set `codex.usageEndpoint` to a compatible base or full usage URL if needed. This is best-effort: endpoint availability and response shape may change.
+Complete Claude Code's normal login in each command, then exit. Configure those same folders in `claude-bridge.json`. Profile folders must be distinct; session files and credentials never cross profiles. `/claude-account` and `/claude-usage` are not provided: switch accounts through `/model` instead.
 
 ## Tests
 
@@ -88,7 +88,7 @@ Use `activeAccount` plus any number of named `accounts`. Global and project conf
 
 `npm test` for the full suite, which adds integration tests that hit APIs (`tests/int-*.{sh,mjs}`: smoke, multi-turn, cache, session-resume, session-rebuild, tool-message). Set `CLAUDE_BRIDGE_TESTING_ALT_PROVIDER` and `CLAUDE_BRIDGE_TESTING_ALT_MODEL` in `.env.test` for the provider-switch tests.
 
-Integration tests spawn real `pi` and Claude Code subprocesses, so they need write access to `~/.claude` for CC's session state — a sandbox that blocks it makes the next turn's `--resume` fail with `No conversation found with session ID`. The RPC harness probes for this at startup and fails fast.
+Integration tests spawn real `pi` and Claude Code subprocesses, so their configured profile folder must be writable for CC session state — a sandbox that blocks it makes the next turn's `--resume` fail with `No conversation found with session ID`. The RPC harness probes for this at startup and fails fast.
 
 ## Debugging
 

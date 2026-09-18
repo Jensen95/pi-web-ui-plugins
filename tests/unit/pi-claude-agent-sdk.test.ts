@@ -1,161 +1,83 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, expect, it } from "vitest";
 import {
-	accountNames,
-	resolveAccount,
-	selectAccount,
-	type AccountsConfig,
-} from "../../packages/pi-claude-agent-sdk/src/accounts.ts";
-import { resolveClaudeChildEnv } from "../../packages/pi-claude-agent-sdk/src/child-env.ts";
-import {
-	fetchCodexUsage,
-	parseAnthropicUsage,
-	parseCodexUsage,
-	type UsageSnapshot,
-} from "../../packages/pi-claude-agent-sdk/src/usage.ts";
+	profileProviderId,
+	resolveProfiles,
+	type ProfilesConfig,
+} from "../../packages/pi-claude-agent-sdk/src/profiles.ts";
+import { buildClaudeChildEnv } from "../../packages/pi-claude-agent-sdk/src/child-env.ts";
 
-const anthropicUsage = {
-	five_hour: { utilization: 37.5, resets_at: "2026-10-01T12:00:00Z" },
-	seven_day: { utilization: 62, resets_at: "2026-10-06T09:00:00Z" },
-};
-
-const codexUsage = {
-	account_id: "work-account",
-	rate_limit: {
-		primary_window: { used_percent: 42, limit_window_seconds: 18_000, reset_at: 1_790_000_000 },
-		secondary_window: { used_percent: 63, limit_window_seconds: 604_800, reset_at: 1_790_500_000 },
-	},
-};
-
-describe("named account profiles", () => {
-	const config: AccountsConfig = {
-		activeAccount: "work",
-		accounts: {
-			personal: { anthropic: { authProvider: "anthropic" } },
-			work: { anthropic: { authProvider: "anthropic-work" } },
-			ci: { codex: { accessTokenEnv: "CI_CODEX_TOKEN" } },
+describe("Claude login profiles", () => {
+	const config: ProfilesConfig = {
+		profiles: {
+			personal: { claudeDir: "~/.claude-personal" },
+			work: { claudeDir: "~/.claude-work" },
 		},
 	};
 
-	it("supports any number of named accounts and preserves stable ordering", () => {
-		expect(accountNames(config)).toEqual(["ci", "personal", "work"]);
+	it("creates one stable picker provider per configured folder", () => {
+		expect(resolveProfiles(config, "/home/alice")).toEqual([
+			{ name: "personal", providerId: "claude-bridge-personal", claudeDir: "/home/alice/.claude-personal" },
+			{ name: "work", providerId: "claude-bridge-work", claudeDir: "/home/alice/.claude-work" },
+		]);
+		expect(profileProviderId("default")).toBe("claude-bridge");
 	});
 
-	it("resolves the configured active account and an explicit account", () => {
-		expect(resolveAccount(config)).toMatchObject({ name: "work", config: config.accounts!.work });
-		expect(resolveAccount(config, "ci")).toMatchObject({ name: "ci", config: config.accounts!.ci });
+	it("does not create a provider until a folder profile is configured", () => {
+		expect(resolveProfiles({}, "/home/alice")).toEqual([]);
 	});
 
-	it("uses a usable default when no account config exists", () => {
-		expect(resolveAccount({})).toEqual({ name: "default", config: {} });
+	it("rejects unsafe names, relative folders, and shared folders", () => {
+		expect(() => resolveProfiles({ profiles: { "Work Login": { claudeDir: "/one" } } }, "/home/alice")).toThrow(
+			/profile name/i,
+		);
+		expect(() => resolveProfiles({ profiles: { work: { claudeDir: "relative" } } }, "/home/alice")).toThrow(
+			/absolute/i,
+		);
+		expect(() =>
+			resolveProfiles(
+				{ profiles: { one: { claudeDir: "~/.claude" }, two: { claudeDir: "/home/alice/.claude" } } },
+				"/home/alice",
+			),
+		).toThrow(/distinct/i);
 	});
 
-	it("routes a named account through its configured environment credential", async () => {
-		const registry = { getProviderAuth: vi.fn() };
-		const env = await resolveClaudeChildEnv(
-			registry,
+	it("rejects two paths to the same folder through a symlink", () => {
+		const root = mkdtempSync(join(tmpdir(), "claude-profile-"));
+		const real = join(root, "real");
+		const alias = join(root, "alias");
+		mkdirSync(real);
+		symlinkSync(real, alias, "dir");
+		try {
+			expect(() =>
+				resolveProfiles({
+					profiles: { personal: { claudeDir: real }, work: { claudeDir: alias } },
+				}),
+			).toThrow(/distinct/i);
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+});
+
+describe("folder-backed Claude child environment", () => {
+	it("uses only the selected folder login and removes inherited credentials", () => {
+		const env = buildClaudeChildEnv(
 			{
-				WORK_ANTHROPIC_TOKEN: "work-secret",
-				ANTHROPIC_API_KEY: "inherited-secret",
+				CLAUDE_CONFIG_DIR: "/wrong-folder",
+				CLAUDE_CODE_OAUTH_TOKEN: "wrong-oauth",
+				ANTHROPIC_API_KEY: "wrong-key",
+				ANTHROPIC_AUTH_TOKEN: "wrong-bearer",
+				ANTHROPIC_BASE_URL: "https://wrong.invalid",
 			},
-			{ anthropic: { tokenEnv: "WORK_ANTHROPIC_TOKEN" } },
+			"/home/alice/.claude-work",
 		);
-		expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBe("work-secret");
+		expect(env.CLAUDE_CONFIG_DIR).toBe("/home/alice/.claude-work");
+		expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
 		expect(env.ANTHROPIC_API_KEY).toBeUndefined();
-		expect(registry.getProviderAuth).not.toHaveBeenCalled();
-	});
-
-	it("does not borrow the default Anthropic credential for a Codex-only account", async () => {
-		const registry = { getProviderAuth: vi.fn().mockResolvedValue({ auth: { apiKey: "default-secret" } }) };
-		await expect(resolveClaudeChildEnv(registry, {}, { codex: {} })).rejects.toThrow(/no anthropic credential/i);
-		expect(registry.getProviderAuth).not.toHaveBeenCalled();
-	});
-
-	it("rejects an unknown or blank account instead of silently using another credential", () => {
-		expect(() => resolveAccount(config, "missing")).toThrow(/unknown account.*missing/i);
-		expect(() => resolveAccount(config, " ")).toThrow(/account name/i);
-	});
-
-	it("changes only the active account while retaining every profile", () => {
-		expect(selectAccount(config, "ci")).toEqual({ ...config, activeAccount: "ci" });
-		expect(selectAccount(config, "ci").accounts).toEqual(config.accounts);
-	});
-});
-
-describe("usage normalization", () => {
-	it("normalizes Anthropic five-hour and seven-day windows", () => {
-		expect(parseAnthropicUsage(anthropicUsage, "work")).toEqual<UsageSnapshot>({
-			provider: "anthropic",
-			account: "work",
-			windows: {
-				fiveHour: { usedPercent: 37.5, resetsAt: "2026-10-01T12:00:00Z" },
-				sevenDay: { usedPercent: 62, resetsAt: "2026-10-06T09:00:00Z" },
-			},
-		});
-	});
-
-	it("normalizes the Codex primary and secondary windows by duration", () => {
-		expect(parseCodexUsage(codexUsage, "work")).toEqual<UsageSnapshot>({
-			provider: "codex",
-			account: "work",
-			windows: {
-				fiveHour: { usedPercent: 42, windowMinutes: 300, resetsAt: 1_790_000_000 },
-				sevenDay: { usedPercent: 63, windowMinutes: 10_080, resetsAt: 1_790_500_000 },
-			},
-		});
-	});
-
-	it("does not invent a window when a provider omits it", () => {
-		const result = parseAnthropicUsage({ five_hour: null, seven_day: { utilization: 0 } }, "personal");
-		expect(result.windows).toEqual({ sevenDay: { usedPercent: 0 } });
-	});
-
-	it("rejects malformed or out-of-range provider data", () => {
-		expect(() => parseAnthropicUsage({ five_hour: { utilization: 101 } }, "personal")).toThrow(/utilization/i);
-		expect(() => parseCodexUsage({ rate_limit: { primary_window: { used_percent: -1 } } }, "personal")).toThrow(
-			/used_percent/i,
-		);
-	});
-});
-
-describe("usage requests", () => {
-	afterEach(() => vi.unstubAllGlobals());
-
-	it("fetches Codex usage with both bearer and account headers", async () => {
-		const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(codexUsage), { status: 200 }));
-		vi.stubGlobal("fetch", fetchMock);
-
-		await expect(
-			fetchCodexUsage({
-				account: "work",
-				token: "codex-secret",
-				accountId: "work-account",
-				endpoint: "https://chat.test/",
-			}),
-		).resolves.toMatchObject({ provider: "codex", account: "work" });
-		const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-		expect(fetchMock.mock.calls[0]?.[0]).toBe("https://chat.test/api/codex/usage");
-		const headers = new Headers(init.headers);
-		expect(headers.get("authorization")).toBe("Bearer codex-secret");
-		expect(headers.get("chatgpt-account-id")).toBe("work-account");
-	});
-
-	it("uses Codex's ChatGPT WHAM usage endpoint by default", async () => {
-		const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(codexUsage), { status: 200 }));
-		vi.stubGlobal("fetch", fetchMock);
-		await fetchCodexUsage({ account: "work", token: "codex-secret" });
-		expect(fetchMock.mock.calls[0]?.[0]).toBe("https://chatgpt.com/backend-api/wham/usage");
-	});
-
-	it("turns an HTTP failure into a useful error without exposing the credential", async () => {
-		vi.stubGlobal(
-			"fetch",
-			vi.fn().mockResolvedValue(new Response("secret-token", { status: 401, statusText: "Unauthorized" })),
-		);
-		await expect(
-			fetchCodexUsage({ account: "personal", token: "secret-token", endpoint: "https://usage.test/oauth" }),
-		).rejects.toThrow(/401|unauthorized/i);
-		await expect(
-			fetchCodexUsage({ account: "personal", token: "secret-token", endpoint: "https://usage.test/oauth" }),
-		).rejects.not.toThrow("secret-token");
+		expect(env.ANTHROPIC_AUTH_TOKEN).toBeUndefined();
+		expect(env.ANTHROPIC_BASE_URL).toBeUndefined();
 	});
 });

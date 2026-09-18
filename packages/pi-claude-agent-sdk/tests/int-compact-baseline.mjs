@@ -6,19 +6,22 @@
 // concurrency. If this fails, fix the environment/harness first — the
 // concurrency test is meaningless on top of a broken baseline.
 
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createRpcHarness, seedPiAnthropicAuth } from "./lib/rpc-harness.mjs";
+import { createRpcHarness, seedClaudeProfile } from "./lib/rpc-harness.mjs";
 
 const TIMEOUT = 180_000;
 const BRIDGE_MODEL = "claude-bridge/claude-haiku-4-5";
 
 const testAgentDir = mkdtempSync(join(tmpdir(), "compact-baseline-agent-"));
-writeFileSync(join(testAgentDir, "settings.json"), JSON.stringify({
-	compaction: { keepRecentTokens: 50 },
-}));
-seedPiAnthropicAuth(testAgentDir);
+writeFileSync(
+	join(testAgentDir, "settings.json"),
+	JSON.stringify({
+		compaction: { keepRecentTokens: 50 },
+	}),
+);
+seedClaudeProfile(testAgentDir);
 
 const harness = createRpcHarness({
 	name: "compact-baseline",
@@ -33,7 +36,9 @@ await startAndWait();
 
 try {
 	console.log("Seed: a few short turns so there is history to compact...");
-	await promptAndWait("Pick a number between 1 and 100 and remember it. Reply with just the number. Do not use the memory system.");
+	await promptAndWait(
+		"Pick a number between 1 and 100 and remember it. Reply with just the number. Do not use the memory system.",
+	);
 	await promptAndWait("Now pick a color. Reply with just the color. Do not use the memory system.");
 	await promptAndWait("Now pick a fruit. Reply with just the fruit. Do not use the memory system.");
 
