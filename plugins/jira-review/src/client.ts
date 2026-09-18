@@ -108,6 +108,13 @@ function makeElement(document: Document, tag: string, text?: string): HTMLElemen
 	return element;
 }
 
+function errorElement(document: Document, text: string): HTMLElement {
+	const error = makeElement(document, "p", text);
+	error.className = "jira-review__error";
+	error.setAttribute("role", "alert");
+	return error;
+}
+
 function field(document: Document, name: string, value = "", type = "text"): HTMLInputElement {
 	const input = document.createElement("input");
 	input.type = type;
@@ -200,11 +207,13 @@ const VIEW_STYLE = `
 .jira-review__tickets-heading h2 { margin: 0; font-size: 1.15rem; letter-spacing: -.015em; }
 .jira-review__tickets-heading input { width: 100%; min-height: 38px; padding: 8px 10px; border: 1px solid var(--jr-border); border-radius: 9px; background: transparent; color: inherit; font: inherit; }
 .jira-review__tickets-heading span { color: var(--jr-muted); font-size: .88rem; }
-.jira-review__tickets { display: grid; grid-template-columns: 1fr; gap: 12px; }
-.jira-review__ticket { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 11px 18px; align-content: start; padding: 18px 20px 18px 24px; border: 1px solid var(--jr-border); border-radius: 14px; background: color-mix(in srgb, currentColor 2%, transparent); box-shadow: 0 3px 14px color-mix(in srgb, black 7%, transparent); overflow: hidden; }
-.jira-review__ticket::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 4px; background: color-mix(in srgb, currentColor 24%, transparent); }
+.jira-review__tickets { display: grid; grid-template-columns: 1fr; gap: 0; border: 1px solid var(--jr-border); border-radius: 14px; overflow: hidden; }
+.jira-review__ticket { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 11px 18px; align-content: start; padding: 17px 18px 17px 22px; border: 0; border-bottom: 1px solid var(--jr-border); background: transparent; }
+.jira-review__ticket:last-child { border-bottom: 0; }
+.jira-review__ticket::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 3px; background: transparent; }
+.jira-review__ticket:hover { background: color-mix(in srgb, currentColor 2.5%, transparent); }
 .jira-review__ticket[aria-busy="true"]::before { background: #e07900; }
-.jira-review__ticket-header, .jira-review__ticket-meta, .jira-review__ticket-folders, .jira-review__hint, .jira-review__saved, .jira-review__error { grid-column: 1; }
+.jira-review__ticket-header, .jira-review__ticket-meta, .jira-review__scope-override, .jira-review__hint, .jira-review__saved, .jira-review__error { grid-column: 1; }
 .jira-review__ticket-header { display: grid; grid-template-columns: max-content max-content 1fr; gap: 7px 10px; align-items: center; }
 .jira-review__ticket-key { color: #0c66e4; font-weight: 780; text-decoration: none; }
 .jira-review__ticket-key:hover { text-decoration: underline; }
@@ -214,6 +223,10 @@ const VIEW_STYLE = `
 .jira-review__reviewing, .jira-review__review-saved { grid-column: 2; grid-row: 1 / span 2; align-self: start; width: fit-content; margin: 0; padding: 5px 9px; border-radius: 999px; font-size: .78rem; font-weight: 750; white-space: nowrap; background: color-mix(in srgb, #e07900 16%, transparent); color: #a54800; }
 .jira-review__review-saved { background: color-mix(in srgb, #1f845a 16%, transparent); color: #167447; }
 .jira-review__saved { display: grid; gap: 10px; padding: 12px 14px; border-radius: 10px; background: color-mix(in srgb, currentColor 5%, transparent); }
+.jira-review__scope-override { width: fit-content; }
+.jira-review__scope-override summary { cursor: pointer; color: var(--jr-muted); font-size: .84rem; font-weight: 650; }
+.jira-review__scope-override[open] { width: min(100%, 620px); padding: 10px 12px; border-radius: 9px; background: color-mix(in srgb, currentColor 4%, transparent); }
+.jira-review__scope-override .jira-review__ticket-folders { margin-top: 9px; }
 .jira-review__review-summary { display: flex; flex-wrap: wrap; gap: 7px 16px; font-size: .88rem; font-weight: 680; }
 .jira-review__review-details { display: grid; gap: 8px; }
 .jira-review__review-details summary { cursor: pointer; color: #0c66e4; font-weight: 680; }
@@ -289,6 +302,7 @@ export default {
 		let ticketQuery = "";
 		let selectedModel = "";
 		let ticketFolderInputs = new Map<string, HTMLInputElement>();
+		let ticketFolderDrafts = new Map<string, string>();
 		const bridge =
 			document.defaultView && (document.defaultView as Window & { __piWebUiHost?: StartChatHost }).__piWebUiHost;
 
@@ -393,11 +407,7 @@ export default {
 			});
 
 			root.append(style(), header, form);
-			if (state.error) {
-				const error = makeElement(document, "p", state.error);
-				error.className = "jira-review__error";
-				root.append(error);
-			}
+			if (state.error) root.append(errorElement(document, state.error));
 			return root;
 		};
 
@@ -446,19 +456,27 @@ export default {
 			const modelControl = makeElement(document, "label");
 			modelControl.className = "jira-review__model";
 			modelControl.append(makeElement(document, "span", "Review model"));
-			const modelInput = field(document, "review-model", selectedModel);
-			modelInput.placeholder = models.length ? "Use current model" : "Update pi-web-ui for model selection";
-			modelInput.disabled = !models.length;
-			const modelOptions = makeElement(document, "datalist") as HTMLDataListElement;
-			modelOptions.setAttribute("id", "jira-review-models");
+			const modelInput = document.createElement("select");
+			modelInput.dataset.field = "review-model";
+			const currentModel = document.createElement("option");
+			currentModel.value = "";
+			currentModel.textContent = "Current model";
+			modelInput.append(currentModel);
 			for (const entry of models) {
-				const option = makeElement(document, "option") as HTMLOptionElement;
+				const option = document.createElement("option");
 				option.value = entry.id;
 				option.textContent = entry.name ? `${entry.name} (${entry.id})` : entry.id;
-				modelOptions.append(option);
+				modelInput.append(option);
 			}
-			modelInput.setAttribute("list", "jira-review-models");
-			modelControl.append(modelInput, modelOptions);
+			modelInput.value = models.some((entry) => entry.id === selectedModel) ? selectedModel : "";
+			const readSelectedModel = (): string =>
+				models.some((entry) => entry.id === modelInput.value.trim()) ? modelInput.value.trim() : "";
+			modelControl.append(modelInput);
+			if (!models.length) {
+				const unavailable = makeElement(document, "small", "Model list unavailable; reviews use the current model.");
+				unavailable.className = "jira-review__hint";
+				modelControl.append(unavailable);
+			}
 			const refresh = makeElement(document, "button", "Refresh tickets") as HTMLButtonElement;
 			refresh.type = "button";
 			refresh.dataset.action = "refresh";
@@ -487,7 +505,7 @@ export default {
 				);
 				// The host creates a tab asynchronously; launching all of them in one event
 				// turn loses every request after the first.
-				selectedModel = modelInput.value.trim();
+				selectedModel = readSelectedModel();
 				const generation = ++queueGeneration;
 				for (const ticket of ticketsToStart) queuedTickets.add(ticket.key);
 				startTicketReviews(
@@ -602,19 +620,23 @@ export default {
 				const meta = makeElement(document, "div");
 				meta.className = "jira-review__ticket-meta";
 				meta.append(makeElement(document, "span", ticket.assignee ? `Assigned to ${ticket.assignee}` : "Unassigned"));
-				const folders = field(document, "ticket-folders");
+				const folders = field(document, "ticket-folders", ticketFolderDrafts.get(ticket.key) ?? "");
 				folders.className = "jira-review__ticket-folders";
 				folders.dataset.key = ticket.key;
 				folders.placeholder = "Comma-separated workspace folders";
-				folders.setAttribute("aria-label", `Review scope override for ${ticket.key}`);
+				folders.setAttribute("aria-label", `Override scope for ${ticket.key}`);
+				folders.addEventListener("input", () => ticketFolderDrafts.set(ticket.key, folders.value));
 				ticketFolderInputs.set(ticket.key, folders);
-				const scopeHint = makeElement(
-					document,
-					"p",
-					"Review scope override (optional): leave blank to use the shared scope.",
+				const scopeDetails = makeElement(document, "details");
+				scopeDetails.className = "jira-review__scope-override";
+				scopeDetails.append(
+					makeElement(document, "summary", `Override scope for ${ticket.key}`),
+					folders,
+					Object.assign(makeElement(document, "p", "Leave blank to use the shared workspace scope."), {
+						className: "jira-review__hint",
+					}),
 				);
-				scopeHint.className = "jira-review__hint";
-				row.append(ticketHeader, meta, folders, scopeHint);
+				row.append(ticketHeader, meta, scopeDetails);
 				const review = state.reviews?.[ticket.key];
 				if (isReviewing(ticket.key)) {
 					const status = makeElement(
@@ -633,11 +655,7 @@ export default {
 					row.append(status, renderReview(document, ticket.key, review));
 				}
 				const reviewError = reviewErrors.get(ticket.key);
-				if (reviewError) {
-					const error = makeElement(document, "p", reviewError);
-					error.className = "jira-review__error";
-					row.append(error);
-				}
+				if (reviewError) row.append(errorElement(document, reviewError));
 				const startReview = makeElement(
 					document,
 					"button",
@@ -650,7 +668,7 @@ export default {
 				startReview.setAttribute("aria-label", `${review ? "Review again" : "Review ticket"} ${ticket.key}`);
 				startReview.addEventListener("click", () => {
 					const foldersForTicket = parseFolderOverride(folders.value) ?? selectedFolders;
-					selectedModel = modelInput.value.trim();
+					selectedModel = readSelectedModel();
 					startTicketReviews(
 						bridge,
 						[ticket],
@@ -674,14 +692,17 @@ export default {
 						},
 					);
 				});
-				const post = makeElement(document, "button", "Post review to Jira") as HTMLButtonElement;
+				const post = makeElement(document, "button", "Post comment & add label") as HTMLButtonElement;
 				post.type = "button";
 				post.dataset.action = "post-review";
 				post.dataset.key = ticket.key;
 				post.disabled = isReviewing(ticket.key) || !review?.draftComment?.trim();
 				post.addEventListener("click", () => {
-					if (review?.draftComment.trim())
-						ctx.send({ action: "post_review", key: ticket.key, comment: review.draftComment });
+					if (!review?.draftComment.trim()) return;
+					const confirm = (document.defaultView as (Window & { confirm?: (message: string) => boolean }) | null)
+						?.confirm;
+					if (confirm && !confirm(`Post the draft comment to ${ticket.key} and add the ${POSTED_LABEL} label?`)) return;
+					ctx.send({ action: "post_review", key: ticket.key, comment: review.draftComment });
 				});
 				const ticketActions = makeElement(document, "div");
 				ticketActions.className = "jira-review__ticket-actions";
@@ -706,11 +727,7 @@ export default {
 			ticketsPanel.append(ticketGrid);
 
 			root.append(style(), header, toolbar, foldersPanel, ticketsPanel);
-			if (state.error) {
-				const error = makeElement(document, "p", state.error);
-				error.className = "jira-review__error";
-				root.append(error);
-			}
+			if (state.error) root.append(errorElement(document, state.error));
 			if (state.notice) root.append(makeElement(document, "p", state.notice));
 			return root;
 		};
@@ -729,11 +746,7 @@ export default {
 					"API token and board.",
 			);
 			root.append(style(), heading, hint);
-			if (state.error) {
-				const error = makeElement(document, "p", state.error);
-				error.className = "jira-review__error";
-				root.append(error);
-			}
+			if (state.error) root.append(errorElement(document, state.error));
 			return root;
 		};
 

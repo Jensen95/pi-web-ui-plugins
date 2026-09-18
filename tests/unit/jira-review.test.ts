@@ -430,6 +430,63 @@ describe("Jira review client", () => {
 		expect(descendants(container).some((element) => element.dataset.ui === "jira-settings")).toBe(false);
 	});
 
+	it("marks settings, dashboard, ticket, and unconfigured errors as alerts", () => {
+		const settingsView = createMockViewContext("jira-review");
+		const settingsDocument = createFakeDocument();
+		const settings = settingsContainer(settingsDocument);
+		jiraClient.mount?.(settings as unknown as HTMLElement, settingsView.ctx);
+		settingsView.push({ kind: "result", error: "Settings failed" });
+		expect(
+			descendants(settings)
+				.find((element) => element.textContent === "Settings failed")
+				?.getAttribute("role"),
+		).toBe("alert");
+
+		const dashboardView = createMockViewContext("jira-review");
+		const dashboardDocument = createFakeDocument();
+		const dashboard = dashboardDocument.createElement("div");
+		jiraClient.mount?.(dashboard as unknown as HTMLElement, dashboardView.ctx);
+		dashboardView.push({ kind: "state", state: { configured: true, error: "Dashboard failed" } });
+		expect(
+			descendants(dashboard)
+				.find((element) => element.textContent === "Dashboard failed")
+				?.getAttribute("role"),
+		).toBe("alert");
+
+		const unconfiguredView = createMockViewContext("jira-review");
+		const unconfiguredDocument = createFakeDocument();
+		const unconfigured = unconfiguredDocument.createElement("div");
+		jiraClient.mount?.(unconfigured as unknown as HTMLElement, unconfiguredView.ctx);
+		unconfiguredView.push({ kind: "state", state: { configured: false, error: "Configuration failed" } });
+		expect(
+			descendants(unconfigured)
+				.find((element) => element.textContent === "Configuration failed")
+				?.getAttribute("role"),
+		).toBe("alert");
+
+		const ticketView = createMockViewContext("jira-review");
+		const ticketDocument = createFakeDocument();
+		ticketDocument.defaultView.__piWebUiHost = { startChat: () => false };
+		const tickets = ticketDocument.createElement("div");
+		jiraClient.mount?.(tickets as unknown as HTMLElement, ticketView.ctx);
+		ticketView.push({
+			kind: "state",
+			state: {
+				configured: true,
+				config: CONFIG,
+				tickets: [{ key: "ABC-1", summary: "Ticket", description: "", status: "To Do" }],
+			},
+		});
+		descendants(tickets)
+			.find((element) => element.dataset.action === "start-review")!
+			.click();
+		expect(
+			descendants(tickets)
+				.find((element) => element.textContent?.includes("Could not start"))
+				?.getAttribute("role"),
+		).toBe("alert");
+	});
+
 	it("imports the site URL and board ID from a Jira board link", () => {
 		const { ctx } = createMockViewContext("jira-review");
 		const document = createFakeDocument();
@@ -594,6 +651,43 @@ describe("Jira review client", () => {
 		vi.useRealTimers();
 	});
 
+	it("preserves ticket scope drafts across state and filter rerenders", () => {
+		const { ctx, push } = createMockViewContext("jira-review");
+		const document = createFakeDocument();
+		const container = document.createElement("div");
+		jiraClient.mount?.(container as unknown as HTMLElement, ctx);
+		const state = {
+			configured: true,
+			config: CONFIG,
+			tickets: [
+				{ key: "ABC-1", summary: "First ticket", description: "", status: "To Do" },
+				{ key: "ABC-2", summary: "Second ticket", description: "", status: "To Do" },
+			],
+		};
+		push({ kind: "state", state });
+
+		const override = descendants(container).find(
+			(element) => element.dataset.field === "ticket-folders" && element.dataset.key === "ABC-1",
+		);
+		override!.value = "src, docs";
+		override!.dispatch("input");
+		push({ kind: "state", state: { ...state, tickets: [...state.tickets] } });
+		expect(
+			descendants(container).find(
+				(element) => element.dataset.field === "ticket-folders" && element.dataset.key === "ABC-1",
+			)?.value,
+		).toBe("src, docs");
+
+		const search = descendants(container).find((element) => element.dataset.field === "ticket-search");
+		search!.value = "first";
+		search!.dispatch("change");
+		expect(
+			descendants(container).find(
+				(element) => element.dataset.field === "ticket-folders" && element.dataset.key === "ABC-1",
+			)?.value,
+		).toBe("src, docs");
+	});
+
 	it("filters visible tickets without changing the Jira result set", () => {
 		const { ctx, push } = createMockViewContext("jira-review");
 		const document = createFakeDocument();
@@ -617,6 +711,68 @@ describe("Jira review client", () => {
 			(element) => element.dataset.key?.startsWith("ABC-") && element.tagName === "article",
 		);
 		expect(cards.map((card) => card.dataset.key)).toEqual(["ABC-2"]);
+	});
+
+	it("keeps the model picker strict and falls back to the current model", () => {
+		const startChat = vi.fn<(options: { prompt: string; newChat?: boolean; model?: string }) => boolean>(() => true);
+		const { ctx, push } = createMockViewContext("jira-review");
+		const document = createFakeDocument();
+		document.defaultView.__piWebUiHost = {
+			startChat,
+			models: {
+				list: () => [
+					{ id: "openai/gpt-5-mini", provider: "openai", name: "GPT-5 mini" },
+					{ id: "anthropic/claude-sonnet", provider: "anthropic", name: "Claude Sonnet" },
+				],
+			},
+		};
+		const container = document.createElement("div");
+		jiraClient.mount?.(container as unknown as HTMLElement, ctx);
+		push({
+			kind: "state",
+			state: {
+				configured: true,
+				config: CONFIG,
+				tickets: [{ key: "ABC-1", summary: "First", description: "One", status: "To Do" }],
+			},
+		});
+
+		const model = descendants(container).find((element) => element.dataset.field === "review-model");
+		expect(model?.tagName).toBe("select");
+		expect(model?.children.map((option) => option.value)).toEqual(["", "openai/gpt-5-mini", "anthropic/claude-sonnet"]);
+		model!.value = "unconfigured/model";
+		descendants(container)
+			.find((element) => element.dataset.action === "start-review")!
+			.click();
+		expect(startChat.mock.calls[0]?.[0]).not.toHaveProperty("model");
+	});
+
+	it("requires confirmation before posting the draft comment and label", () => {
+		const confirm = vi.fn<(message: string) => boolean>(() => false);
+		const { ctx, sent, push } = createMockViewContext("jira-review");
+		const document = createFakeDocument();
+		document.defaultView.confirm = confirm;
+		const container = document.createElement("div");
+		jiraClient.mount?.(container as unknown as HTMLElement, ctx);
+		push({
+			kind: "state",
+			state: {
+				configured: true,
+				config: CONFIG,
+				tickets: [{ key: "ABC-1", summary: "First", description: "One", status: "To Do" }],
+				reviews: { "ABC-1": review() },
+			},
+		});
+
+		const post = descendants(container).find((element) => element.dataset.action === "post-review");
+		expect(post?.textContent).toBe("Post comment & add label");
+		post!.click();
+		expect(confirm).toHaveBeenCalledWith(expect.stringContaining("add the dogits-dans-le-nez label"));
+		expect(sent.some((payload) => (payload as Record<string, unknown>).action === "post_review")).toBe(false);
+
+		confirm.mockReturnValue(true);
+		post!.click();
+		expect(sent).toContainEqual({ action: "post_review", key: "ABC-1", comment: "The ticket is ready for pickup." });
 	});
 
 	it("shows launch failures and lets a queued batch be cancelled", () => {
@@ -703,6 +859,7 @@ interface FakeElement {
 	checked: boolean;
 	disabled: boolean;
 	dataset: Record<string, string>;
+	attributes: Record<string, string>;
 	children: FakeElement[];
 	ownerDocument: FakeDocument;
 	/** Ancestor class names, so closest() can answer which host surface this is. */
@@ -713,6 +870,7 @@ interface FakeElement {
 	replaceChildren(...children: FakeElement[]): void;
 	click(): void;
 	dispatch(type: string, event?: any): void;
+	getAttribute(name: string): string | null;
 	setAttribute(name: string, value: string): void;
 }
 
@@ -722,6 +880,7 @@ interface FakeDocument {
 			startChat?: (options: { prompt: string; newChat?: boolean; model?: string }) => boolean;
 			models?: { list?: () => readonly { id: string; provider: string; name?: string }[] };
 		};
+		confirm?: (message: string) => boolean;
 	};
 	createElement(tagName: string): FakeElement;
 }
@@ -738,6 +897,7 @@ function createFakeDocument(): FakeDocument {
 			checked: false,
 			disabled: false,
 			dataset: {},
+			attributes: {},
 			children: [],
 			ownerDocument: document,
 			ancestorClasses: [],
@@ -761,7 +921,11 @@ function createFakeDocument(): FakeDocument {
 			dispatch(type, event) {
 				for (const listener of listeners.get(type) ?? []) listener(event);
 			},
+			getAttribute(name) {
+				return element.attributes[name] ?? null;
+			},
 			setAttribute(name, value) {
+				element.attributes[name] = value;
 				if (name.startsWith("data-")) element.dataset[name.slice(5)] = value;
 			},
 		};
