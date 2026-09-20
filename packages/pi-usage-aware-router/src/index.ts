@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { Type } from "typebox";
 import { readStoredCredential, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { loadConfig, parseOpenAIUsage, select, type Usage } from "./router.js";
+import { loadConfig, parseOpenAIUsage, select, usageKey, type Usage } from "./router.js";
 
 const params = Type.Object({
 	subagent_type: Type.String(),
@@ -46,10 +46,11 @@ async function refreshOpenAI(usage: Map<string, Usage>, signal: AbortSignal): Pr
 		if (!response.ok) return;
 		const observations = parseOpenAIUsage(await response.json());
 		if (!observations) return;
-		const highest = observations.reduce((a, b) => ((b.utilization ?? 0) > (a.utilization ?? 0) ? b : a));
-		usage.set("openai-codex", highest);
+		for (const [key, observed] of usage)
+			if (observed.providerId === "openai-codex") usage.delete(key);
+		for (const observed of observations) usage.set(usageKey(observed), observed);
 	} catch {
-		/* Unknown retains an unexpired observation. */
+		/* Keep the last observations until their reset time. */
 	}
 }
 
@@ -58,24 +59,43 @@ export default function (pi: ExtensionAPI) {
 	let lastOpenAI = 0;
 	pi.events.on("claude-bridge:usage", (event: unknown) => {
 		const value = event as Usage;
-		usage.set(value.providerId, value);
+		usage.set(usageKey(value), value);
 	});
 	pi.registerTool<typeof params>({
 		name: "UsageAwareAgent",
 		label: "Usage-aware agent",
 		description:
-			"Delegate when no exact model is requested. Chooses a subscription model with available usage; ordinary Agent remains available for normal delegation.",
+			"Delegate through pi-subagents while choosing a comparable subscription model with available usage. Pass model only when the user requested an exact model.",
+		promptSnippet: "Delegate through a usage-aware subscription model",
+		promptGuidelines: [
+			"Prefer UsageAwareAgent over Agent for delegation when the user did not request an exact model; choose fast, balanced, or strong from task complexity.",
+			"When the user requests an exact model, pass its full provider/model ID to UsageAwareAgent.model.",
+		],
 		parameters: params,
-		async execute(_id, input, signal) {
+		async execute(_id, input, signal, _onUpdate, ctx) {
 			const config = loadConfig(process.cwd());
-			if (Date.now() - lastOpenAI >= config.openaiRefreshMs) {
+			if (!input.model && Date.now() - lastOpenAI >= config.openaiRefreshMs) {
 				lastOpenAI = Date.now();
-				await refreshOpenAI(usage, signal ?? new AbortController().signal);
+				const refreshSignal = signal
+					? AbortSignal.any([signal, AbortSignal.timeout(5_000)])
+					: AbortSignal.timeout(5_000);
+				await refreshOpenAI(usage, refreshSignal);
+			}
+			if (input.model) {
+				const [provider, model, extra] = input.model.split("/");
+				if (!provider || !model || extra || !ctx.modelRegistry.find(provider, model))
+					throw new Error(`Exact model is unavailable: ${input.model}`);
 			}
 			const selected =
 				input.model ??
 				(() => {
-					const candidate = select(input.tier ?? "balanced", config, usage);
+					const candidate = select(
+						input.tier ?? "balanced",
+						config,
+						usage,
+						Date.now(),
+						(value) => Boolean(ctx.modelRegistry.find(value.provider, value.model)),
+					);
 					return candidate && `${candidate.provider}/${candidate.model}`;
 				})();
 			if (!selected)
@@ -98,7 +118,12 @@ export default function (pi: ExtensionAPI) {
 					requestId,
 					type: input.subagent_type,
 					prompt: input.prompt,
-					options: { model: selected, description: input.description ?? input.name, isBackground: true },
+					options: {
+						model: selected,
+						description: input.description,
+						name: input.name,
+						isBackground: true,
+					},
 				});
 			});
 			if (!reply.success || !reply.data?.id) throw new Error(reply.error ?? "pi-subagents failed to spawn agent");

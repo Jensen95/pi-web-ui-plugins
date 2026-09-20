@@ -7,6 +7,7 @@ export type Status = "allowed" | "allowed_warning" | "rejected";
 export interface Usage {
 	providerId: string;
 	status: Status;
+	rateLimitType?: string;
 	utilization?: number;
 	resetsAt?: number;
 }
@@ -48,8 +49,17 @@ function read(path: string): Record<string, unknown> {
 	}
 }
 function strings(value: unknown, label: string, models = true): string[] {
-	if (!Array.isArray(value) || value.some((v) => typeof v !== "string" || (models && !v.includes("/"))))
-		throw new Error(`${label} must be ${models ? "model strings" : "strings"}`);
+	if (
+		!Array.isArray(value) ||
+		value.length === 0 ||
+		value.some(
+			(v) =>
+				typeof v !== "string" ||
+				v.length === 0 ||
+				(models && !/^[^/]+\/[^/]+$/.test(v)),
+		)
+	)
+		throw new Error(`${label} must be a non-empty array of ${models ? "provider/model strings" : "strings"}`);
 	return value;
 }
 
@@ -102,28 +112,54 @@ export function expandCandidates(tier: Tier, config: Config): Candidate[] {
 	});
 }
 
+export function usageKey(usage: Usage): string {
+	return `${usage.providerId}\0${usage.rateLimitType ?? "default"}`;
+}
+
+function activeUsage(candidate: Candidate, usage: Map<string, Usage>, now: number): Usage[] {
+	return [...usage.values()].filter(
+		(observed) =>
+			observed.providerId === candidate.provider &&
+			(!observed.resetsAt || observed.resetsAt * 1000 > now),
+	);
+}
+
 export function classify(
 	candidate: Candidate,
 	usage: Map<string, Usage>,
 	now = Date.now(),
 	max = defaults.maxUtilization,
 ): "healthy" | "unknown" | "warning" | "blocked" {
-	const observed = usage.get(candidate.provider);
-	if (!observed || (observed.resetsAt && observed.resetsAt * 1000 <= now)) return "unknown";
-	if (observed.status === "rejected" || (observed.utilization ?? 0) >= 1) return "blocked";
-	if (observed.status === "allowed_warning" || (observed.utilization ?? 0) >= max) return "warning";
+	const observations = activeUsage(candidate, usage, now);
+	if (observations.length === 0) return "unknown";
+	if (observations.some((o) => o.status === "rejected" || (o.utilization ?? 0) >= 1)) return "blocked";
+	if (observations.some((o) => o.status === "allowed_warning" || (o.utilization ?? 0) >= max)) return "warning";
 	return "healthy";
 }
-export function select(tier: Tier, config: Config, usage: Map<string, Usage>, now = Date.now()): Candidate | undefined {
+
+function utilization(candidate: Candidate, usage: Map<string, Usage>, now: number): number | undefined {
+	const values = activeUsage(candidate, usage, now)
+		.map((observed) => observed.utilization)
+		.filter((value): value is number => value !== undefined);
+	return values.length ? Math.max(...values) : undefined;
+}
+
+export function select(
+	tier: Tier,
+	config: Config,
+	usage: Map<string, Usage>,
+	now = Date.now(),
+	available: (candidate: Candidate) => boolean = () => true,
+): Candidate | undefined {
 	const rank = { healthy: 0, unknown: 1, warning: 2, blocked: 3 };
 	return expandCandidates(tier, config)
-		.filter((c) => classify(c, usage, now, config.maxUtilization) !== "blocked")
+		.filter((candidate) => available(candidate) && classify(candidate, usage, now, config.maxUtilization) !== "blocked")
 		.sort((a, b) => {
 			const ar = rank[classify(a, usage, now, config.maxUtilization)],
 				br = rank[classify(b, usage, now, config.maxUtilization)];
 			if (ar !== br) return ar - br;
-			const au = usage.get(a.provider)?.utilization,
-				bu = usage.get(b.provider)?.utilization;
+			const au = utilization(a, usage, now),
+				bu = utilization(b, usage, now);
 			if (au !== undefined && bu !== undefined && au !== bu) return au - bu;
 			if (au !== undefined && bu === undefined) return -1;
 			if (au === undefined && bu !== undefined) return 1;
@@ -132,23 +168,42 @@ export function select(tier: Tier, config: Config, usage: Map<string, Usage>, no
 }
 
 export function parseOpenAIUsage(value: unknown): Usage[] | undefined {
-	const body = value as { primary_window?: any; secondary_window?: any };
-	const windows = [body?.primary_window, body?.secondary_window].filter(Boolean);
-	if (!windows.length) return undefined;
-	const parsed = windows.map((window) => {
-		const utilization = window.used_percent ?? window.utilization;
+	const body = value as { primary_window?: unknown; secondary_window?: unknown };
+	const windows = [
+		["primary", body?.primary_window],
+		["secondary", body?.secondary_window],
+	] as const;
+	const present = windows.filter((entry) => entry[1] && typeof entry[1] === "object");
+	if (!present.length) return undefined;
+	const parsed = present.map(([rateLimitType, raw]) => {
+		const window = raw as Record<string, unknown>;
+		const usedPercent = window.used_percent;
+		const fraction = window.utilization;
+		const utilization =
+			typeof usedPercent === "number"
+				? usedPercent / 100
+				: typeof fraction === "number"
+					? fraction
+					: undefined;
 		const resetsAt = window.reset_at ?? window.reset_at_unix;
-		if (typeof utilization !== "number" || !Number.isFinite(utilization) || typeof resetsAt !== "number")
+		if (
+			utilization === undefined ||
+			!Number.isFinite(utilization) ||
+			utilization < 0 ||
+			typeof resetsAt !== "number" ||
+			!Number.isFinite(resetsAt)
+		)
 			return undefined;
 		return {
 			providerId: "openai-codex",
+			rateLimitType,
 			status:
 				utilization >= 1
 					? ("rejected" as const)
 					: utilization >= 0.9
 						? ("allowed_warning" as const)
 						: ("allowed" as const),
-			utilization: utilization > 1 ? utilization / 100 : utilization,
+			utilization,
 			resetsAt,
 		};
 	});

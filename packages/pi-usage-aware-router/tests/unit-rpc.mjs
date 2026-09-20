@@ -24,12 +24,20 @@ describe("UsageAwareAgent RPC", () => {
 				},
 			},
 		});
-		const result = await tool.execute("call", {
-			subagent_type: "Explore",
-			prompt: "inspect",
-			model: "openai-codex/gpt-5.6-sol",
-		});
+		const result = await tool.execute(
+			"call",
+			{
+				subagent_type: "Explore",
+				prompt: "inspect",
+				model: "openai-codex/gpt-5.6-sol",
+				name: "quota-test",
+			},
+			undefined,
+			undefined,
+			{ modelRegistry: { find: (provider, model) => provider === "openai-codex" && model === "gpt-5.6-sol" } },
+		);
 		assert.equal(sent.options.model, "openai-codex/gpt-5.6-sol");
+		assert.equal(sent.options.name, "quota-test");
 		assert.equal(result.details.id, "agent-1");
 	});
 });

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { defaults, expandCandidates, classify, parseOpenAIUsage, select } from "../src/router.ts";
+import { defaults, expandCandidates, classify, parseOpenAIUsage, select, usageKey } from "../src/router.ts";
 
 const config = { ...defaults, claudeProfiles: ["personal", "work"] };
 describe("usage router", () => {
@@ -33,6 +33,19 @@ describe("usage router", () => {
 			),
 			"unknown",
 		);
+	});
+	it("tracks each usage window and uses the worst active one", () => {
+		const candidate = expandCandidates("fast", config)[0];
+		const observations = [
+			{ providerId: "openai-codex", rateLimitType: "primary", status: "allowed", utilization: 0.2 },
+			{ providerId: "openai-codex", rateLimitType: "secondary", status: "allowed_warning", utilization: 0.95 },
+		];
+		const usage = new Map(observations.map((value) => [usageKey(value), value]));
+		assert.equal(classify(candidate, usage), "warning");
+	});
+	it("converts OpenAI used_percent to a fraction", () => {
+		const parsed = parseOpenAIUsage({ primary_window: { used_percent: 1, reset_at: 123 } });
+		assert.equal(parsed?.[0].utilization, 0.01);
 	});
 	it("rejects malformed OpenAI usage", () =>
 		assert.equal(parseOpenAIUsage({ primary_window: { used_percent: "bad" } }), undefined));
