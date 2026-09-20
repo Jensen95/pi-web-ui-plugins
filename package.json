@@ -19,9 +19,9 @@
 		"node": ">=22.19.0"
 	},
 	"scripts": {
-		"test": "vitest run && npm run test:unit --workspace packages/pi-claude-agent-sdk",
+		"test": "vitest run && npm run test:unit --workspace packages/pi-claude-agent-sdk && npm run test:unit --workspace packages/pi-usage-aware-router",
 		"test:watch": "vitest",
-		"typecheck": "tsc -p tsconfig.json --noEmit && npm run typecheck --workspace packages/pi-claude-agent-sdk",
+		"typecheck": "tsc -p tsconfig.json --noEmit && npm run typecheck --workspace packages/pi-claude-agent-sdk && npm run typecheck --workspace packages/pi-usage-aware-router",
 		"lint": "oxlint packages/ plugins/ scripts/ tests/",
 		"lint:fix": "oxlint --fix plugins/ scripts/ tests/",
 		"format": "prettier --write .",

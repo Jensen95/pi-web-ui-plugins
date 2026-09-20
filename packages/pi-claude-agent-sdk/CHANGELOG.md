@@ -2,6 +2,7 @@
 
 ## UNRELEASED
 
+- **Add: usage event** — every Claude Code rate-limit observation is emitted as `claude-bridge:usage`, attributed to its configured folder-backed profile, for cooperating extensions.
 - **Change: folder-backed Claude profiles** — each configured `profiles.<name>.claudeDir` registers a separate model-picker provider and runs only with that folder's manual Claude Code login. Removed account switching, Pi-auth credential injection, Codex usage lookup, and `/claude-account` / `/claude-usage`.
 
 ## 0.8.6 — 2026-09-01

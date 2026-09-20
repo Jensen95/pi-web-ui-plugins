@@ -8,7 +8,7 @@ These are English-only TypeScript ports of the upstream plugins. `legado-web` (C
 (China-only WeChat), and `demo-mailbox` (an upstream protocol sample, not in its catalog) are deliberate skips. See
 [Acknowledgements](#acknowledgements) for where they came from.
 
-This is also a monorepo: `packages/pi-claude-agent-sdk` is a separately installable pi provider package and is not part of the pi-web-ui catalog.
+This is also a monorepo: `packages/pi-claude-agent-sdk` and `packages/pi-usage-aware-router` are separately installable pi extension packages and are not part of the pi-web-ui catalog.
 
 ## Plugins
 
@@ -50,6 +50,10 @@ pi install "$PWD/packages/pi-claude-agent-sdk"
 Use `pi install -l "$PWD/packages/pi-claude-agent-sdk"` for a project-local install.
 
 Configure named Claude Code folder profiles; each appears as its own model-picker provider and uses its own manual Claude Code login. See [`packages/pi-claude-agent-sdk/README.md`](packages/pi-claude-agent-sdk/README.md) for profile configuration and authentication details.
+
+## Usage-aware subagent router
+
+`packages/pi-usage-aware-router` adds `UsageAwareAgent`, which delegates through pi-subagents' public RPC and selects available Claude folder-profile or OpenAI Codex subscription models. See its [README](packages/pi-usage-aware-router/README.md) for configuration and telemetry limits.
 
 ## Browser extension
 

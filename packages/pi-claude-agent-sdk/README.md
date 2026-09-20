@@ -82,6 +82,10 @@ CLAUDE_CONFIG_DIR="$HOME/.claude-work" claude
 
 Complete Claude Code's normal login in each command, then exit. Configure those same folders in `claude-bridge.json`. Profile folders must be distinct; session files and credentials never cross profiles. `/claude-account` and `/claude-usage` are not provided: switch accounts through `/model` instead.
 
+### Usage events
+
+The provider emits every Claude Code rate-limit observation on Pi's event bus as `claude-bridge:usage`. The payload contains `providerId`, the configured folder `profile`, `observedAt`, `status`, and when supplied by Claude Code `rateLimitType`, `utilization`, and `resetsAt`. It is in-memory session telemetry only; it does not alter profile authentication or persist usage data.
+
 ## Tests
 
 `npm run test:unit` for offline tests (`tests/unit-*.mjs`: queue, import, skills).

@@ -498,6 +498,30 @@ function describeRateLimitFailure(rejection: { rateLimitType?: string; resetsAt?
 	return `Claude rate limit${kind}${resets}: ${failure}`;
 }
 
+type UsageEmitter = (usage: ClaudeUsageEvent) => void;
+export interface ClaudeUsageEvent {
+	providerId: string;
+	profile: string;
+	observedAt: number;
+	status: "allowed" | "allowed_warning" | "rejected";
+	rateLimitType?: string;
+	utilization?: number;
+	resetsAt?: number;
+}
+
+function normalizeUsageEvent(profile: ClaudeProfile, info: any): ClaudeUsageEvent | undefined {
+	if (!info || !["allowed", "allowed_warning", "rejected"].includes(info.status)) return undefined;
+	return {
+		providerId: profile.providerId,
+		profile: profile.name,
+		observedAt: Date.now(),
+		status: info.status,
+		...(typeof info.rateLimitType === "string" ? { rateLimitType: info.rateLimitType } : {}),
+		...(typeof info.utilization === "number" ? { utilization: info.utilization } : {}),
+		...(typeof info.resetsAt === "number" ? { resetsAt: info.resetsAt } : {}),
+	};
+}
+
 function standaloneStreamFn(
 	profile: ClaudeProfile,
 	model: Model<any>,
@@ -1425,6 +1449,8 @@ async function consumeQuery(
 	model: Model<any>,
 	wasAborted: () => boolean,
 	queryCtx: QueryContext,
+	profile?: ClaudeProfile,
+	emitUsage?: UsageEmitter,
 ): Promise<{ capturedSessionId?: string }> {
 	let capturedSessionId: string | undefined;
 
@@ -1464,6 +1490,8 @@ async function consumeQuery(
 		}
 		if (message.type === "rate_limit_event") {
 			const info = (message as any).rate_limit_info;
+			const usage = profile && normalizeUsageEvent(profile, info);
+			if (usage) emitUsage?.(usage);
 			debug("consumeQuery: rate_limit_event", JSON.stringify(info).slice(0, 300));
 			if (info?.status === "rejected") {
 				// Held so the failure Claude Code sends next can be named as a rate limit.
@@ -1663,6 +1691,7 @@ function streamClaudeAgentSdk(
 	model: Model<any>,
 	context: Context,
 	options?: SimpleStreamOptions,
+	emitUsage?: UsageEmitter,
 ): AssistantMessageEventStream {
 	if (isStandaloneRequest(context, options)) {
 		debug(`provider: routing ${profile.providerId} standalone cacheRetention=none request to isolated subprocess`);
@@ -1954,6 +1983,8 @@ function streamClaudeAgentSdk(
 			model,
 			() => wasAborted,
 			queryCtx,
+			profile,
+			emitUsage,
 		);
 		debug(
 			`provider: consumeQuery completed, stopReason=${queryCtx.turnOutput?.stopReason}, error=${queryCtx.turnOutput?.errorMessage}, aborted=${wasAborted}`,
@@ -2144,7 +2175,7 @@ export default function (pi: ExtensionAPI) {
 			api: "claude-bridge",
 			models: registeredModels,
 			streamSimple: ((model: Model<any>, context: Context, options?: SimpleStreamOptions) =>
-				streamClaudeAgentSdk(profile, model, context, options)) as any,
+				streamClaudeAgentSdk(profile, model, context, options, (usage) => pi.events.emit("claude-bridge:usage", usage))) as any,
 		});
 	}
 }
