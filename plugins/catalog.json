@@ -64,6 +64,14 @@
 		"homepage": "https://github.com/Jensen95/pi-web-ui-plugins/tree/main/plugins/run-trace"
 	},
 	{
+		"id": "session-shadow",
+		"name": "Session Shadow",
+		"icon": "👥",
+		"description": "Observe the host-active agent session from another browser and exchange human messages scoped to that session.",
+		"source": "Jensen95/pi-web-ui-plugins/plugins/session-shadow",
+		"homepage": "https://github.com/Jensen95/pi-web-ui-plugins/tree/main/plugins/session-shadow"
+	},
+	{
 		"id": "mcp-manager",
 		"name": "mcp-manager",
 		"icon": "🔌",

@@ -1,0 +1,34 @@
+{
+	"id": "session-shadow",
+	"name": "Session Shadow",
+	"version": "0.1.0",
+	"apiVersion": 2,
+	"icon": "👥",
+	"description": "Observe the host-active agent session from another browser in a compact right-panel feed and exchange human messages scoped to that session.",
+	"permissions": ["ui"],
+	"view": false,
+	"ui": {
+		"rightpanel.tabs": [
+			{
+				"id": "shadow",
+				"label": "Session Shadow",
+				"icon": "👥",
+				"kind": "view",
+				"view": "shadow"
+			}
+		],
+		"settings.pages": [
+			{
+				"id": "identity",
+				"label": "Session Shadow",
+				"icon": "👥",
+				"kind": "page"
+			}
+		]
+	},
+	"build": {
+		"install": "npm install --ignore-scripts --no-audit --no-fund esbuild@0.28.2",
+		"command": "npx --no-install esbuild src/index.ts --bundle --platform=node --format=esm --target=es2022 --packages=external --outfile=index.mjs && npx --no-install esbuild src/client.ts --bundle --platform=browser --format=esm --target=es2022 --loader:.css=text --external:./vendor/* --outfile=client/entry.mjs",
+		"outputs": ["index.mjs", "client/entry.mjs"]
+	}
+}

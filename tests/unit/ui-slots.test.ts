@@ -38,14 +38,14 @@ import { repoPath } from "../helpers/repo-files";
 const SETTINGS_PAGE_PLUGINS = ["catalog-sync", "mcp-manager", "ui-shortcuts"];
 
 /**
- * Plugins that legitimately own two surfaces: a tab for the work, a settings
- * page for the credentials behind it.
+ * Plugins that legitimately own two surfaces: one work view plus one settings
+ * page for configuration local to that work.
  *
  * This is only safe because the host gives the plugin a way to tell them apart -
- * the settings container sits inside `.plugin-page`, the tab container does not
+ * the settings container sits inside `.plugin-page`, work views do not
  * (the ctx is byte-identical on both paths). One screen per surface, never both.
  */
-const SPLIT_SURFACE_PLUGINS = ["jira-review"];
+const SPLIT_SURFACE_PLUGINS = ["jira-review", "session-shadow"];
 
 const ID_RE = /^[A-Za-z0-9_-]+$/;
 const UI_KINDS = new Set(["view", "action", "badge", "menu", "page", "organizer", "divider"]);
@@ -180,7 +180,7 @@ describe("ui contributions", () => {
 		}
 	});
 
-	it("gives a split-surface plugin exactly one settings page beside its tab", () => {
+	it("gives a split-surface plugin one settings page beside one work view", () => {
 		for (const dirName of SPLIT_SURFACE_PLUGINS) {
 			const manifest = manifestOf(dirName) as RawManifest & { view?: unknown };
 			const pages = manifest.ui?.["settings.pages"];
@@ -189,7 +189,12 @@ describe("ui contributions", () => {
 			// would be indistinguishable from the first.
 			expect((pages as UiItem[]).length).toBe(1);
 			expect((pages as UiItem[])[0]?.kind).toBe("page");
-			expect(manifest.view, `plugins/${dirName} keeps its tab`).not.toBe(false);
+
+			const workSlots = Object.entries(manifest.ui ?? {}).filter(
+				([slot, items]) => slot !== "settings.pages" && slot !== "arrange" && slot !== "items" && Array.isArray(items),
+			);
+			const workViews = workSlots.length + (manifest.view === false ? 0 : 1);
+			expect(workViews, `plugins/${dirName} needs exactly one work view beside settings`).toBe(1);
 		}
 	});
 });

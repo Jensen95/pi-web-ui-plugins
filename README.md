@@ -22,6 +22,7 @@ This is also a monorepo: `packages/pi-claude-agent-sdk` and `packages/pi-usage-a
 | `vscode-editor`     | 📝   | Multi-root file tree, tabbed CodeMirror editing, xterm.js terminals, Remote-SSH browsing and SFTP sync.                      | `fs`, `net:ssh`, `terminal` |
 | `mermaid`           | 📊   | Renders `mermaid` fences in messages as SVG. Renderer plugin, so the engine loads only when such a fence appears.            | none                        |
 | `run-trace`         | 🧭   | Aggregates a run into one replayable timeline: task, reasoning, tool calls, file changes, result.                            | none                        |
+| `session-shadow`    | 👥   | Mirrors the host-active session in the right panel and adds per-session chat shared across browser windows.                  | `ui`                        |
 | `mcp-manager`       | 🔌   | Manages MCP servers through `pi-mcp-adapter`: inspect the effective config, enable or disable servers, add or remove them.   | `http`                      |
 | `image-toolkit`     | 🖼    | Compresses, crops, resizes, converts, watermarks and inspects workspace images, with four AI tools.                          | `fs`, `http`, `tools`       |
 | `ui-shortcuts`      | ⌨️   | Switches between the Terminal, Editor and Run Trace views, with a small UI for custom view, compose, and new-chat shortcuts. | none                        |
@@ -117,6 +118,7 @@ npm run build:jira-review  # compile the Jira review plugin
 npm run build:worktree-preparer # compile the worktree preparer plugin
 npm run build:voice-input      # compile the voice input plugin
 npm run build:subagent-config # compile the subagent config plugin
+npm run build:session-shadow  # compile the session shadow plugin
 npm run build:mermaid    # compile one plugin (also available for every other id)
 npm test                 # vitest plus the provider package's offline unit suite
 npm run typecheck        # root TypeScript plus packages/pi-claude-agent-sdk/typecheck
