@@ -52,12 +52,7 @@ function strings(value: unknown, label: string, models = true): string[] {
 	if (
 		!Array.isArray(value) ||
 		value.length === 0 ||
-		value.some(
-			(v) =>
-				typeof v !== "string" ||
-				v.length === 0 ||
-				(models && !/^[^/]+\/[^/]+$/.test(v)),
-		)
+		value.some((v) => typeof v !== "string" || v.length === 0 || (models && !/^[^/]+\/[^/]+$/.test(v)))
 	)
 		throw new Error(`${label} must be a non-empty array of ${models ? "provider/model strings" : "strings"}`);
 	return value;
@@ -118,9 +113,7 @@ export function usageKey(usage: Usage): string {
 
 function activeUsage(candidate: Candidate, usage: Map<string, Usage>, now: number): Usage[] {
 	return [...usage.values()].filter(
-		(observed) =>
-			observed.providerId === candidate.provider &&
-			(!observed.resetsAt || observed.resetsAt * 1000 > now),
+		(observed) => observed.providerId === candidate.provider && (!observed.resetsAt || observed.resetsAt * 1000 > now),
 	);
 }
 
@@ -180,11 +173,7 @@ export function parseOpenAIUsage(value: unknown): Usage[] | undefined {
 		const usedPercent = window.used_percent;
 		const fraction = window.utilization;
 		const utilization =
-			typeof usedPercent === "number"
-				? usedPercent / 100
-				: typeof fraction === "number"
-					? fraction
-					: undefined;
+			typeof usedPercent === "number" ? usedPercent / 100 : typeof fraction === "number" ? fraction : undefined;
 		const resetsAt = window.reset_at ?? window.reset_at_unix;
 		if (
 			utilization === undefined ||

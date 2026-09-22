@@ -46,8 +46,7 @@ async function refreshOpenAI(usage: Map<string, Usage>, signal: AbortSignal): Pr
 		if (!response.ok) return;
 		const observations = parseOpenAIUsage(await response.json());
 		if (!observations) return;
-		for (const [key, observed] of usage)
-			if (observed.providerId === "openai-codex") usage.delete(key);
+		for (const [key, observed] of usage) if (observed.providerId === "openai-codex") usage.delete(key);
 		for (const observed of observations) usage.set(usageKey(observed), observed);
 	} catch {
 		/* Keep the last observations until their reset time. */
@@ -89,12 +88,8 @@ export default function (pi: ExtensionAPI) {
 			const selected =
 				input.model ??
 				(() => {
-					const candidate = select(
-						input.tier ?? "balanced",
-						config,
-						usage,
-						Date.now(),
-						(value) => Boolean(ctx.modelRegistry.find(value.provider, value.model)),
+					const candidate = select(input.tier ?? "balanced", config, usage, Date.now(), (value) =>
+						Boolean(ctx.modelRegistry.find(value.provider, value.model)),
 					);
 					return candidate && `${candidate.provider}/${candidate.model}`;
 				})();
