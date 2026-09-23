@@ -5,7 +5,11 @@ Shows the active sprint from Jira Cloud and filters it with a configurable ready
 For each ticket, select workspace folders for the agent to inspect. The shared folder selection is remembered separately
 for each workspace, and the ticket list can be filtered before starting a batch. A review run opens one new pi chat per
 ticket, pinned to the currently selected pi-web-ui project. The plugin follows later project switches and refreshes its
-workspace folder choices. The agent saves a structured result through `jira_review_save`:
+workspace folder choices. Each chat acts as a lead: it asks two read-only Explore (Luna) agents to inspect code and tests,
+then proposes a concrete solution. Batch reviews never change files; a single-ticket review may attempt a small, localized
+implementation and run a relevant check. If the `@tintinweb/pi-subagents` Agent tool is unavailable, the lead investigates
+alone and reports that limitation. The folder selection guides inspection but does not sandbox agent access. The agent
+saves a structured result through `jira_review_save`:
 
 - ready for pickup;
 - difficulty: easy, medium, or hard;
