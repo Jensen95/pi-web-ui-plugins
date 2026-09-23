@@ -1,5 +1,15 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { mkdir, mkdtemp, readdir, rm, writeFile, readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createMockHost, createMockViewContext } from "../helpers/mock-host";
+
+const execFileMock = vi.hoisted(() => vi.fn());
+vi.mock("node:child_process", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("node:child_process")>();
+	return { ...actual, execFile: execFileMock };
+});
+afterEach(() => execFileMock.mockReset());
 import type { MockHost } from "../helpers/mock-host";
 import worktreeClient, {
 	describeEntry,
@@ -14,6 +24,8 @@ import worktreeClient, {
 import worktreeServer from "../../plugins/worktree-preparer/src/index";
 import {
 	DEFAULT_EXCLUDES,
+	defaultFileOperations,
+	defaultRunner,
 	addFolders,
 	defaultOutputBase,
 	prepareProject,
@@ -93,6 +105,55 @@ function descendants(root: FakeElement): FakeElement[] {
 }
 
 describe("worktree preparation operations", () => {
+	it("bounds Git command timeouts and reports an actionable error", async () => {
+		execFileMock.mockImplementation((_command, _args, _options, callback) => {
+			callback(Object.assign(new Error("Command was killed"), { code: "ETIMEDOUT", killed: true, signal: "SIGTERM" }));
+		});
+
+		const fetch = await defaultRunner.run("git", ["-C", "/repo", "fetch", "origin", "main"], "/repo");
+		const inspect = await defaultRunner.run("git", ["-C", "/repo", "rev-parse", "--show-toplevel"], "/repo");
+		const remote = await defaultRunner.run("git", ["-C", "/repo", "ls-remote", "--symref", "origin", "HEAD"], "/repo");
+
+		expect(execFileMock.mock.calls.map((call) => call[2].timeout)).toEqual([120_000, 30_000, 120_000]);
+		expect(fetch.stderr).toMatch(/timed out after 120 seconds/i);
+		expect(fetch.stderr).toMatch(/check.*repository.*remote.*retry/i);
+		expect(inspect.stderr).toMatch(/timed out after 30 seconds/i);
+		expect(remote.stderr).toMatch(/timed out after 120 seconds/i);
+
+		execFileMock.mockImplementation((_command, _args, _options, callback) => {
+			callback(
+				Object.assign(new Error("stdout maxBuffer length exceeded"), {
+					code: "ERR_CHILD_PROCESS_STDIO_MAXBUFFER",
+					killed: true,
+				}),
+			);
+		});
+		expect((await defaultRunner.run("git", ["-C", "/repo", "status"], "/repo")).stderr).toMatch(/maxBuffer/);
+	});
+
+	it("copies the selected root while excluding generated directories by name", async () => {
+		const temporary = await mkdtemp(join(tmpdir(), "worktree-preparer-"));
+		const source = join(temporary, ".next");
+		const destination = join(temporary, "copy");
+		try {
+			await mkdir(join(source, "src", ".next"), { recursive: true });
+			await mkdir(join(source, "src", ".venv"), { recursive: true });
+			await mkdir(join(source, "src", "target"), { recursive: true });
+			await writeFile(join(source, "src", "index.ts"), "source");
+			await writeFile(join(source, "src", ".next", "cache"), "generated");
+			await writeFile(join(source, "src", ".venv", "cache"), "generated");
+			await writeFile(join(source, "src", "target", "cache"), "generated");
+
+			await defaultFileOperations.copyTree(source, destination, DEFAULT_EXCLUDES);
+
+			expect(await readFile(join(destination, "src", "index.ts"), "utf8")).toBe("source");
+			const copiedSourceEntries = await readdir(join(destination, "src"));
+			for (const excluded of [".next", ".venv", "target"]) expect(copiedSourceEntries).not.toContain(excluded);
+		} finally {
+			await rm(temporary, { recursive: true, force: true });
+		}
+	});
+
 	it("creates one branch worktree per repository off its own remote default while copying non-Git folders", async () => {
 		const runner = gitRunner({
 			repos: { "/workspace/repo-a": "/workspace/repo-a", "/workspace/repo-b": "/workspace/repo-b" },

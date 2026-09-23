@@ -5,7 +5,7 @@ projects as the files it works on.
 
 - A selected **Git repository** gets one new branch checked out as a `git worktree` inside the aggregate. The source
   repository is never reset or checked out, so uncommitted work stays where it is.
-- A selected **plain folder** is copied, excluding `.git`, `node_modules`, `dist`, `build`, and `coverage`.
+- A selected **plain folder** is copied, excluding `.git`, `node_modules`, `dist`, `build`, `coverage`, `.next`, `.venv`, and `target`. Exclusions match basenames at any depth; the selected source root is always copied.
 - One branch name is used for every repository in the run.
 
 ## Using it
@@ -31,7 +31,8 @@ changed by the explicit **Add selected folders** action.
 
 The base branch is resolved per repository: `refs/remotes/origin/HEAD` first, then `git ls-remote --symref origin HEAD`,
 and only then the `master` fallback. The worktree is created off `origin/<default>` after fetching it, so `main`,
-`master`, and `trunk` repositories all work in the same run without asking.
+`master`, and `trunk` repositories all work in the same run without asking. Git commands have a 30-second timeout;
+`fetch` and `ls-remote` get two minutes. Timeout errors identify the command and suggest checking the repository or remote connection.
 
 ## What "Open session here" actually scopes
 

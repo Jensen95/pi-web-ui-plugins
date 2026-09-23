@@ -4,7 +4,16 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "nod
 import { homedir } from "node:os";
 import { promisify } from "node:util";
 
-export const DEFAULT_EXCLUDES = [".git", "node_modules", "dist", "build", "coverage"] as const;
+export const DEFAULT_EXCLUDES = [
+	".git",
+	"node_modules",
+	"dist",
+	"build",
+	"coverage",
+	".next",
+	".venv",
+	"target",
+] as const;
 
 /** Last resort when a repository has no resolvable remote default branch. */
 export const FALLBACK_BASE_BRANCH = "master";
@@ -80,18 +89,33 @@ export interface FolderProbe {
 }
 
 const execFileAsync = promisify(execFile);
+const DEFAULT_COMMAND_TIMEOUT_MS = 30_000;
+const REMOTE_GIT_TIMEOUT_MS = 120_000;
 
 export const defaultRunner: CommandRunner = {
 	async run(command, args, cwd) {
+		const timeout =
+			command === "git" && (args[2] === "fetch" || args[2] === "ls-remote")
+				? REMOTE_GIT_TIMEOUT_MS
+				: DEFAULT_COMMAND_TIMEOUT_MS;
 		try {
-			const result = await execFileAsync(command, args, { cwd, maxBuffer: 1024 * 1024 });
+			const result = await execFileAsync(command, args, { cwd, maxBuffer: 1024 * 1024, timeout });
 			return { code: 0, stdout: result.stdout, stderr: result.stderr };
 		} catch (error) {
-			const failure = error as { code?: number | string; stdout?: string; stderr?: string; message?: string };
+			const failure = error as {
+				code?: number | string | null;
+				stdout?: string;
+				stderr?: string;
+				message?: string;
+				killed?: boolean;
+			};
+			const timedOut = failure.code === "ETIMEDOUT" || (failure.killed && failure.code == null);
 			return {
 				code: typeof failure.code === "number" ? failure.code : 1,
 				stdout: failure.stdout ?? "",
-				stderr: failure.stderr ?? failure.message ?? String(error),
+				stderr: timedOut
+					? `${command} ${args.join(" ")} timed out after ${timeout / 1000} seconds; check the repository or remote connection, then retry.`
+					: (failure.stderr ?? failure.message ?? String(error)),
 			};
 		}
 	},
@@ -102,10 +126,11 @@ export const defaultFileOperations: FileOperations = {
 		await makeDirectory(path, { recursive });
 	},
 	async copyTree(source, destination, excludes) {
+		const root = resolve(source);
 		const excluded = new Set(excludes);
 		await cp(source, destination, {
 			recursive: true,
-			filter: (entry) => !excluded.has(basename(entry)),
+			filter: (entry) => resolve(entry) === root || !excluded.has(basename(entry)),
 		});
 	},
 };
