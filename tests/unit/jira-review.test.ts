@@ -661,6 +661,71 @@ describe("Jira review client", () => {
 		vi.useRealTimers();
 	});
 
+	it("offers an opt-in batch implementation mode and waits for each saved review before launching the next", () => {
+		const startChat = vi.fn<(options: { prompt: string; newChat?: boolean }) => boolean>(() => true);
+		const { ctx, push } = createMockViewContext("jira-review");
+		const document = createFakeDocument();
+		document.defaultView.__piWebUiHost = { startChat };
+		const container = document.createElement("div");
+		jiraClient.mount?.(container as unknown as HTMLElement, ctx);
+		const tickets = [
+			{ key: "ABC-1", summary: "First", description: "One", status: "To Do" },
+			{ key: "ABC-2", summary: "Second", description: "Two", status: "To Do" },
+		];
+		push({ kind: "state", state: { configured: true, config: CONFIG, tickets, reviews: {} } });
+		const toggle = descendants(container).find((element) => element.dataset.field === "batch-implementation");
+		expect(toggle).toBeDefined();
+		expect(toggle?.checked).toBe(false);
+		toggle!.checked = true;
+		toggle!.dispatch("change");
+		descendants(container)
+			.find((element) => element.dataset.action === "start-reviews")!
+			.click();
+
+		expect(startChat).toHaveBeenCalledTimes(1);
+		expect(startChat.mock.calls[0]![0].prompt).toContain("small, localized change");
+		expect(startChat.mock.calls[0]![0].prompt).toContain("ABC-1");
+		expect(descendants(container).find((element) => element.dataset.field === "batch-implementation")?.checked).toBe(
+			true,
+		);
+		push({
+			kind: "state",
+			state: { configured: true, config: CONFIG, tickets, reviews: {}, reviewing: { "ABC-1": 1 } },
+		});
+		expect(startChat).toHaveBeenCalledTimes(1);
+		push({
+			kind: "state",
+			state: { configured: true, config: CONFIG, tickets, reviews: { "ABC-1": review() }, reviewing: {} },
+		});
+		expect(startChat).toHaveBeenCalledTimes(2);
+		expect(startChat.mock.calls[1]![0].prompt).toContain("ABC-2");
+	});
+
+	it("cancels queued implementation reviews without launching the next ticket", () => {
+		const startChat = vi.fn(() => true);
+		const { ctx, push } = createMockViewContext("jira-review");
+		const document = createFakeDocument();
+		document.defaultView.__piWebUiHost = { startChat };
+		const container = document.createElement("div");
+		jiraClient.mount?.(container as unknown as HTMLElement, ctx);
+		const tickets = [
+			{ key: "ABC-1", summary: "First", description: "One", status: "To Do" },
+			{ key: "ABC-2", summary: "Second", description: "Two", status: "To Do" },
+		];
+		push({ kind: "state", state: { configured: true, config: CONFIG, tickets, reviews: {} } });
+		const toggle = descendants(container).find((element) => element.dataset.field === "batch-implementation")!;
+		toggle.checked = true;
+		toggle.dispatch("change");
+		descendants(container)
+			.find((element) => element.dataset.action === "start-reviews")!
+			.click();
+		descendants(container)
+			.find((element) => element.dataset.action === "cancel-queue")!
+			.click();
+		push({ kind: "state", state: { configured: true, config: CONFIG, tickets, reviews: { "ABC-1": review() } } });
+		expect(startChat).toHaveBeenCalledTimes(1);
+	});
+
 	it("preserves ticket scope drafts across state and filter rerenders", () => {
 		const { ctx, push } = createMockViewContext("jira-review");
 		const document = createFakeDocument();
