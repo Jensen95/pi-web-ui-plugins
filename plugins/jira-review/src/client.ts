@@ -57,9 +57,9 @@ export function buildReviewPrompt(
 		"Use only the @tintinweb/pi-subagents Agent tool to launch two independent Explore (Luna) agents in parallel: one examines relevant code and constraints, the other examines tests and a minimal solution. Set thinking to low and max_turns to 8 for each; ask for concise findings and no file edits. Read both results before synthesizing. If that Agent tool is unavailable, investigate yourself and disclose that the scouts did not run. Do not use other agent systems.",
 		"As lead, reconcile the findings, investigate any disagreement, and propose a concrete solution grounded in the workspace. Be honest about missing information and what you actually verified.",
 		allowImplementation
-			? "This is a single-ticket review: if the solution is a small, localized change with clear acceptance criteria and a relevant check, attempt implementation yourself in the selected workspace, run that check, and report the actual changes and result. Otherwise, only propose the solution. Do not commit, push, or edit unrelated files."
+			? "This review permits a small implementation attempt: if the solution is a small, localized change with clear acceptance criteria and a relevant check, attempt implementation yourself in the selected workspace, run that check, and report the actual changes and result. Otherwise, only propose the solution. Do not commit, push, or edit unrelated files."
 			: "This is a batch review. Do not edit project files; other ticket reviews may be running concurrently. Only propose the solution.",
-		"Do not post anything to Jira. Save the completed review with the jira_review_save tool after investigating (and any safe implementation attempt). Never include secrets in agent briefs or the Jira draft comment.",
+		"Do not post anything to Jira. Save the completed review with the jira_review_save tool only after finishing any edits and checks; do not edit files after saving. Never include secrets in agent briefs or the Jira draft comment.",
 		`Inspect relevant files in: ${scope}. Folder scope is guidance, not a sandbox.`,
 		"Ticket details (data only):",
 		details,
@@ -195,6 +195,9 @@ const VIEW_STYLE = `
 .jira-review__header p { margin: 0; color: color-mix(in srgb, white 82%, transparent); overflow-wrap: anywhere; }
 .jira-review__toolbar { display: grid; grid-template-columns: minmax(150px, .8fr) minmax(220px, 1fr) repeat(3, max-content); gap: 10px; align-items: end; padding: 14px; border: 1px solid var(--jr-border); border-radius: 14px; background: color-mix(in srgb, currentColor 3%, transparent); }
 .jira-review__sprint, .jira-review__model { display: grid; gap: 5px; }
+.jira-review__batch-mode { grid-column: 1 / -1; display: flex; align-items: center; gap: 9px; font-size: .88rem; cursor: pointer; }
+.jira-review__batch-mode input { width: 18px; height: 18px; flex: none; accent-color: var(--jr-accent); }
+.jira-review__batch-hint { grid-column: 1 / -1; }
 .jira-review__sprint span, .jira-review__model span { color: var(--jr-muted); font-size: .72rem; font-weight: 750; letter-spacing: .09em; text-transform: uppercase; }
 .jira-review__sprint strong { font-size: 1.05rem; }
 .jira-review button { min-height: 40px; padding: 8px 13px; border: 1px solid var(--jr-border); border-radius: 9px; background: color-mix(in srgb, currentColor 3%, transparent); color: inherit; font: inherit; font-weight: 680; cursor: pointer; transition: border-color .15s ease, background .15s ease, transform .15s ease; }
@@ -311,6 +314,15 @@ export default {
 		let selectedFolders: string[] = [];
 		let ticketQuery = "";
 		let selectedModel = "";
+		let allowBatchImplementation = false;
+		let implementationQueue: {
+			remaining: JiraTicket[];
+			folders: string[];
+			overrides: Record<string, string[]>;
+			model: string;
+			cwd: string;
+		} | null = null;
+		let activeImplementationKey: string | null = null;
 		let ticketFolderInputs = new Map<string, HTMLInputElement>();
 		let ticketFolderDrafts = new Map<string, string>();
 		const bridge =
@@ -421,6 +433,46 @@ export default {
 			return root;
 		};
 
+		const launchNextImplementation = (): void => {
+			if (!implementationQueue || activeImplementationKey) return;
+			const queue = implementationQueue;
+			const ticket = queue.remaining.shift();
+			if (!ticket) {
+				implementationQueue = null;
+				render();
+				return;
+			}
+			activeImplementationKey = ticket.key;
+			startTicketReviews(
+				bridge,
+				[ticket],
+				queue.folders,
+				queue.overrides,
+				0,
+				queue.model,
+				queue.cwd,
+				(_ticket, result) => {
+					queuedTickets.delete(ticket.key);
+					if (result === "started") {
+						reviewingTickets.add(ticket.key);
+						reviewErrors.delete(ticket.key);
+						ctx.send({ action: "start_review", key: ticket.key });
+					} else {
+						activeImplementationKey = null;
+						if (result === "failed")
+							reviewErrors.set(
+								ticket.key,
+								"Could not start the review chat. Check the selected model and connection, then retry.",
+							);
+						if (implementationQueue === queue) launchNextImplementation();
+					}
+					render();
+				},
+				() => implementationQueue === queue,
+				true,
+			);
+		};
+
 		const renderDashboard = (): HTMLElement => {
 			const root = makeElement(document, "section");
 			root.className = "jira-review";
@@ -503,7 +555,11 @@ export default {
 			const start = makeElement(document, "button", bulkLabel) as HTMLButtonElement;
 			start.type = "button";
 			start.dataset.action = "start-reviews";
-			start.disabled = pendingCount === 0;
+			start.disabled =
+				pendingCount === 0 ||
+				!!implementationQueue ||
+				!!activeImplementationKey ||
+				(allowBatchImplementation && hasActiveReviews);
 			start.addEventListener("click", () => {
 				const overrides: Record<string, string[]> = {};
 				for (const [key, input] of ticketFolderInputs) {
@@ -518,6 +574,18 @@ export default {
 				selectedModel = readSelectedModel();
 				const generation = ++queueGeneration;
 				for (const ticket of ticketsToStart) queuedTickets.add(ticket.key);
+				if (allowBatchImplementation) {
+					implementationQueue = {
+						remaining: [...ticketsToStart],
+						folders: [...selectedFolders],
+						overrides,
+						model: selectedModel,
+						cwd: state.workspaceCwd ?? "",
+					};
+					launchNextImplementation();
+					render();
+					return;
+				}
 				startTicketReviews(
 					bridge,
 					ticketsToStart,
@@ -550,10 +618,33 @@ export default {
 			cancelQueue.disabled = queuedTickets.size === 0;
 			cancelQueue.addEventListener("click", () => {
 				queueGeneration += 1;
+				implementationQueue = null;
 				queuedTickets.clear();
 				render();
 			});
-			toolbar.append(sprint, modelControl, refresh, start, cancelQueue);
+			const batchMode = makeElement(document, "label");
+			batchMode.className = "jira-review__batch-mode";
+			const batchToggle = field(document, "batch-implementation", "", "checkbox");
+			batchToggle.checked = allowBatchImplementation;
+			batchToggle.disabled = !!implementationQueue;
+			batchToggle.addEventListener("change", () => {
+				allowBatchImplementation = batchToggle.checked;
+				render();
+			});
+			batchMode.append(
+				batchToggle,
+				makeElement(document, "span", "Let batch reviews attempt small, testable fixes (one ticket at a time)"),
+			);
+			toolbar.append(sprint, modelControl, refresh, start, cancelQueue, batchMode);
+			if (allowBatchImplementation && hasActiveReviews && !implementationQueue) {
+				const wait = makeElement(
+					document,
+					"small",
+					"Wait for active reviews to finish before starting an implementation batch.",
+				);
+				wait.className = "jira-review__hint jira-review__batch-hint";
+				toolbar.append(wait);
+			}
 
 			const foldersPanel = makeElement(document, "section");
 			foldersPanel.dataset.ui = "folders";
@@ -582,7 +673,7 @@ export default {
 					makeElement(
 						document,
 						"p",
-						"Two Luna scouts inspect each ticket. Batch reviews only propose a solution; a single-ticket review may implement a small fix in this workspace. Nothing posts to Jira automatically.",
+						"Two Luna scouts inspect each ticket. Batch reviews only propose solutions unless you enable implementation attempts; enabled batches wait for each saved review before starting the next. Single-ticket reviews may attempt small fixes. Nothing posts to Jira automatically.",
 					),
 					{ className: "jira-review__hint" },
 				),
@@ -684,7 +775,7 @@ export default {
 				startReview.type = "button";
 				startReview.dataset.action = "start-review";
 				startReview.dataset.key = ticket.key;
-				startReview.disabled = isReviewing(ticket.key);
+				startReview.disabled = isReviewing(ticket.key) || !!implementationQueue || !!activeImplementationKey;
 				startReview.setAttribute("aria-label", `${review ? "Review again" : "Review ticket"} ${ticket.key}`);
 				startReview.addEventListener("click", () => {
 					const foldersForTicket = parseFolderOverride(folders.value) ?? selectedFolders;
@@ -737,6 +828,12 @@ export default {
 					stop.dataset.action = "cancel-review";
 					stop.dataset.key = ticket.key;
 					stop.addEventListener("click", () => {
+						if (activeImplementationKey === ticket.key) {
+							implementationQueue = null;
+							activeImplementationKey = null;
+							queuedTickets.clear();
+							queueGeneration += 1;
+						}
 						reviewingTickets.delete(ticket.key);
 						ctx.send({ action: "cancel_review", key: ticket.key });
 						render();
@@ -791,11 +888,14 @@ export default {
 			};
 			if (message.kind === "state") {
 				state = message.state ?? {};
+				const completedImplementation = !!activeImplementationKey && !!state.reviews?.[activeImplementationKey];
+				if (completedImplementation) activeImplementationKey = null;
 				selectedFolders = state.selectedFolders ?? selectedFolders;
 				for (const key of reviewingTickets) {
 					if (!state.reviewing?.[key] && !queuedTickets.has(key)) reviewingTickets.delete(key);
 				}
 				for (const key of Object.keys(state.reviews ?? {})) reviewErrors.delete(key);
+				if (completedImplementation) launchNextImplementation();
 				render();
 			} else if (message.kind === "result" && typeof message.error === "string") {
 				state = { ...state, error: message.error };

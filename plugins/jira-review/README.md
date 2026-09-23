@@ -6,8 +6,11 @@ For each ticket, select workspace folders for the agent to inspect. The shared f
 for each workspace, and the ticket list can be filtered before starting a batch. A review run opens one new pi chat per
 ticket, pinned to the currently selected pi-web-ui project. The plugin follows later project switches and refreshes its
 workspace folder choices. Each chat acts as a lead: it asks two read-only Explore (Luna) agents to inspect code and tests,
-then proposes a concrete solution. Batch reviews never change files; a single-ticket review may attempt a small, localized
-implementation and run a relevant check. If the `@tintinweb/pi-subagents` Agent tool is unavailable, the lead investigates
+then proposes a concrete solution. Batch reviews are read-only by default. Turn on **Let batch reviews attempt small,
+testable fixes** to allow the same limited implementation attempt as a single-ticket review. This mode launches one ticket
+at a time, waiting for its saved review before starting the next; if a review never saves, cancel the queued tickets or
+mark the run stopped. Cancelling the queue does not stop an already-open chat. The queue itself is local to the current
+view and does not survive a reload. If the `@tintinweb/pi-subagents` Agent tool is unavailable, the lead investigates
 alone and reports that limitation. The folder selection guides inspection but does not sandbox agent access. The agent
 saves a structured result through `jira_review_save`:
 
