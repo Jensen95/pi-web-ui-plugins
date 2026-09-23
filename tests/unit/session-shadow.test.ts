@@ -121,12 +121,14 @@ describe("session-shadow server", () => {
 		await host.emit.message(
 			{
 				action: "post_chat",
+				requestId: "chat-a-1",
 				sessionId: "session-a-root",
 				identity: { name: "Alice", email: "alice@example.com" },
 				text: "Watching this run.",
 			},
 			"browser-a",
 		);
+		expect(sentErrors(host).at(-1)).toMatchObject({ kind: "result", ok: true, requestId: "chat-a-1" });
 
 		active = snapshot("conv-b", "Session B", "session-b-root");
 		await host.emit.conversationChanged();
@@ -184,11 +186,13 @@ describe("session-shadow server", () => {
 			{
 				action: "post_chat",
 				sessionId: "session-a-root",
+				requestId: "chat-failed-1",
 				identity: { name: "Alice", email: "alice@example.com" },
 				text: "Do not publish this.",
 			},
 			"browser-a",
 		);
+		expect(sentErrors(host).at(-1)).toMatchObject({ requestId: "chat-failed-1" });
 		expect(sentErrors(host).at(-1)?.error).toMatch(/save|persist|disk/i);
 		expect(host.recorded.broadcasts).toHaveLength(before);
 		cleanup?.();
@@ -240,10 +244,12 @@ interface FakeElement {
 	setAttribute(name: string, value: string): void;
 	addEventListener(type: string, listener: (event: FakeEvent) => void): void;
 	dispatch(type: string): void;
+	focus(): void;
 	closest(selector: string): FakeElement | null;
 }
 
 interface FakeDocument {
+	activeElement?: FakeElement;
 	defaultView: { localStorage: FakeStorage };
 	createElement(tagName: string): FakeElement;
 }
@@ -288,6 +294,9 @@ function createDom(settingsSurface = false): {
 			dispatch(type) {
 				const event = { preventDefault() {} };
 				for (const listener of listeners.get(type) ?? []) listener(event);
+			},
+			focus() {
+				document.activeElement = element;
 			},
 			closest(selector) {
 				return settingsSurface && selector === ".plugin-page" ? element : null;
@@ -358,15 +367,125 @@ describe("session-shadow client", () => {
 		expect(visibleText(container)).toContain("<b>do not parse me</b>");
 		expect(visibleText(container)).toContain("Bob");
 		expect(visibleText(container)).toContain("I am observing too.");
+		expect(visibleText(container)).toContain("Live · Agent responding");
+		expect(field(container, "chat").attributes["aria-label"]).toBe("Message to observers");
+		expect(field(container, "chat").attributes.maxlength).toBe("2000");
 
 		field(container, "chat").value = "Looks good.";
+		field(container, "chat").dispatch("input");
+		expect(visibleText(container)).toContain("11 / 2,000");
 		form(container).dispatch("submit");
-		expect(channel.sent.at(-1)).toEqual({
+		expect(channel.sent.at(-1)).toMatchObject({
 			action: "post_chat",
+			requestId: expect.any(String),
 			sessionId: "session-a-root",
 			identity: { name: "Alice", email: "alice@example.com" },
 			text: "Looks good.",
 		});
+		cleanup?.();
+	});
+
+	it("keeps a draft and a browsed room when live updates arrive for the active room", () => {
+		const { container, storage } = createDom();
+		storage.setItem(IDENTITY_KEY, JSON.stringify({ name: "Alice", email: "alice@example.com" }));
+		const channel = createMockViewContext("session-shadow");
+		const cleanup = client.mount(container as unknown as HTMLElement, channel.ctx);
+		const sessions = [
+			{ id: "session-a-root", title: "Older room", isStreaming: false },
+			{ id: "session-b-root", title: "Active room", isStreaming: true },
+		];
+		const room = (id: string, title: string, activity: string) => ({
+			id,
+			title,
+			isStreaming: id === "session-b-root",
+			activity: [{ id: `${id}-activity`, kind: "answer", text: activity }],
+			chat: [],
+		});
+
+		channel.push({
+			kind: "state",
+			activeSessionId: "session-b-root",
+			sessions,
+			session: room("session-b-root", "Active room", "Active room activity"),
+		});
+		field(container, "session").value = "session-a-root";
+		field(container, "session").dispatch("change");
+		channel.push({
+			kind: "state",
+			activeSessionId: "session-b-root",
+			sessions,
+			session: room("session-a-root", "Older room", "Older room activity"),
+		});
+		field(container, "chat").value = "An unsent draft";
+		field(container, "chat").dispatch("input");
+		field(container, "chat").focus();
+
+		channel.push({
+			kind: "state",
+			activeSessionId: "session-b-root",
+			sessions,
+			session: room("session-b-root", "Active room", "New active update"),
+		});
+
+		expect(field(container, "session").value).toBe("session-a-root");
+		expect(field(container, "chat").value).toBe("An unsent draft");
+		expect(container.ownerDocument.activeElement).toBe(field(container, "chat"));
+		expect(visibleText(container)).toContain("Older room activity");
+		expect(visibleText(container)).not.toContain("New active update");
+		cleanup?.();
+	});
+
+	it("does not label a previously streaming room live after the active session ends", () => {
+		const { container } = createDom();
+		const channel = createMockViewContext("session-shadow");
+		const cleanup = client.mount(container as unknown as HTMLElement, channel.ctx);
+		const room = { id: "session-a-root", title: "Session A", isStreaming: true, activity: [], chat: [] };
+		channel.push({ kind: "state", activeSessionId: room.id, sessions: [room], session: room });
+		channel.push({ kind: "state", activeSessionId: null, sessions: [room], session: null });
+		field(container, "session").value = room.id;
+		field(container, "session").dispatch("change");
+		channel.push({ kind: "state", activeSessionId: null, sessions: [room], session: room });
+		expect(visibleText(container)).toContain("Paused · No active response");
+		cleanup?.();
+	});
+
+	it("clears a submitted draft only after its correlated success and reports outcomes", () => {
+		const { container, storage } = createDom();
+		storage.setItem(IDENTITY_KEY, JSON.stringify({ name: "Alice", email: "alice@example.com" }));
+		const channel = createMockViewContext("session-shadow");
+		const cleanup = client.mount(container as unknown as HTMLElement, channel.ctx);
+		channel.push({
+			kind: "state",
+			activeSessionId: "session-a-root",
+			sessions: [{ id: "session-a-root", title: "Session A", isStreaming: false }],
+			session: { id: "session-a-root", title: "Session A", isStreaming: false, activity: [], chat: [] },
+		});
+
+		field(container, "chat").value = "Keep this if persistence fails";
+		field(container, "chat").dispatch("input");
+		form(container).dispatch("submit");
+		const failedRequest = channel.sent.at(-1) as Record<string, unknown>;
+		expect(failedRequest).toMatchObject({ action: "post_chat", sessionId: "session-a-root" });
+		expect(failedRequest.requestId).toEqual(expect.any(String));
+		channel.push({
+			kind: "result",
+			ok: false,
+			requestId: failedRequest.requestId,
+			error: "Could not persist chat: disk full",
+		});
+		expect(field(container, "chat").value).toBe("Keep this if persistence fails");
+		expect(visibleText(container)).toMatch(/disk full/i);
+
+		field(container, "chat").value = "A newer draft";
+		field(container, "chat").dispatch("input");
+		channel.push({ kind: "result", ok: true, requestId: failedRequest.requestId });
+		expect(field(container, "chat").value).toBe("A newer draft");
+
+		form(container).dispatch("submit");
+		const successfulRequest = channel.sent.at(-1) as Record<string, unknown>;
+		channel.push({ kind: "result", ok: true, requestId: successfulRequest.requestId });
+		expect(field(container, "chat").value).toBe("");
+		expect(visibleText(container)).toMatch(/message sent/i);
 		cleanup?.();
 	});
 

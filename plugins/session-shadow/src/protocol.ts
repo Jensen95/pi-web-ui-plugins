@@ -47,5 +47,6 @@ export interface StatePayload {
 export interface ResultPayload {
 	kind: "result";
 	ok: boolean;
+	requestId?: string;
 	error?: string;
 }
