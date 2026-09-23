@@ -327,6 +327,9 @@ describe("Jira review client", () => {
 		expect(startChat.mock.calls[1]?.[0].prompt).toContain("confidence");
 		expect(startChat.mock.calls[1]?.[0].prompt).not.toContain(TOKEN);
 		expect(startChat.mock.calls.every(([options]) => !String(options.prompt).includes("post_review"))).toBe(true);
+		expect(
+			startChat.mock.calls.every(([options]) => String(options.prompt).includes("Do not edit project files")),
+		).toBe(true);
 	});
 
 	it("builds a safe prompt and tolerates a missing or broken host bridge", () => {
@@ -336,6 +339,13 @@ describe("Jira review client", () => {
 		);
 		expect(prompt).toContain("Do not post anything to Jira");
 		expect(prompt).toContain("jira_review_save");
+		expect(prompt).toContain("@tintinweb/pi-subagents");
+		expect(prompt).toContain("two independent Explore (Luna) agents");
+		expect(prompt).toContain("concrete solution");
+		expect(prompt).toContain("Do not edit project files");
+		expect(buildReviewPrompt({ key: "ABC-1", summary: "A", description: "", status: "" }, [], true)).toContain(
+			"small, localized change",
+		);
 		expect(() =>
 			startTicketReviews(undefined, [{ key: "ABC-1", summary: "A", description: "", status: "" }], [], {}),
 		).not.toThrow();
@@ -842,6 +852,7 @@ describe("Jira review client", () => {
 
 		expect(startChat).toHaveBeenCalledTimes(1);
 		expect(startChat.mock.calls[0]![0].prompt).toContain("ABC-1");
+		expect(startChat.mock.calls[0]![0].prompt).toContain("small, localized change");
 		expect(startChat.mock.calls[0]![0]).toMatchObject({
 			model: "openai/gpt-5-mini",
 			cwd: "/workspace/current-project",
