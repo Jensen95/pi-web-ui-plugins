@@ -209,29 +209,31 @@ export default {
 			publish();
 		};
 
-		const reject = (clientId: string | undefined, error: string): void => {
-			if (clientId) host.sendTo(clientId, { kind: "result", ok: false, error });
+		const reject = (clientId: string | undefined, error: string, requestId = ""): void => {
+			if (clientId) host.sendTo(clientId, { kind: "result", ok: false, error, ...(requestId ? { requestId } : {}) });
 		};
 
 		const onMessage = host.onMessage((raw, from) => {
 			if (!raw || typeof raw !== "object") return reject(from, "Malformed request");
 			const request = raw as Record<string, unknown>;
+			const requestId = text(request.requestId, 80);
 			const action = text(request.action, 40);
 			if (action === "state") return publish(from);
 			if (action === "get_session") {
 				const id = text(request.sessionId, 200);
-				if (!rooms.has(id)) return reject(from, "Unknown session");
+				if (!rooms.has(id)) return reject(from, "Unknown session", requestId);
 				return publish(from, id);
 			}
-			if (action !== "post_chat") return reject(from, "Unknown action");
+			if (action !== "post_chat") return reject(from, "Unknown action", requestId);
 
 			const id = text(request.sessionId, 200);
-			if (!rooms.has(id)) return reject(from, "Unknown session");
+			if (!rooms.has(id)) return reject(from, "Unknown session", requestId);
 			const identity = normalizeIdentity(request.identity);
-			if (!identity) return reject(from, "Set a valid name and email in Session Shadow settings");
+			if (!identity) return reject(from, "Set a valid name and email in Session Shadow settings", requestId);
 			const body = text(request.text, MAX_CHAT_TEXT + 1);
-			if (!body) return reject(from, "Chat message is empty");
-			if (body.length > MAX_CHAT_TEXT) return reject(from, `Chat message exceeds ${MAX_CHAT_TEXT} characters`);
+			if (!body) return reject(from, "Chat message is empty", requestId);
+			if (body.length > MAX_CHAT_TEXT)
+				return reject(from, `Chat message exceeds ${MAX_CHAT_TEXT} characters`, requestId);
 
 			const entry: ChatMessage = { id: randomUUID(), ...identity, text: body, at: Date.now() };
 			const nextRoom = [...(chats[id] ?? []), entry].slice(-MAX_CHAT);
@@ -239,14 +241,18 @@ export default {
 			try {
 				host.storage.set(CHAT_STORAGE_KEY, nextChats);
 			} catch (error) {
-				return reject(from, `Could not persist chat: ${error instanceof Error ? error.message : String(error)}`);
+				return reject(
+					from,
+					`Could not persist chat: ${error instanceof Error ? error.message : String(error)}`,
+					requestId,
+				);
 			}
 			chats = nextChats;
 			const room = rooms.get(id);
-			if (!room) return reject(from, "Unknown session");
+			if (!room) return reject(from, "Unknown session", requestId);
 			rooms.set(id, { ...room, chat: nextRoom });
 			publish(undefined, id);
-			if (from) host.sendTo(from, { kind: "result", ok: true });
+			if (from) host.sendTo(from, { kind: "result", ok: true, ...(requestId ? { requestId } : {}) });
 		});
 
 		const onAttach = host.onAttach((clientId) => publish(clientId));
