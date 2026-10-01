@@ -70,7 +70,7 @@
 		"codemirror": "^6.0.1",
 		"esbuild": "^0.28.2",
 		"mermaid": "^11.17.2",
-		"oxlint": "^1.81.0",
+		"oxlint": "^1.85.0",
 		"prettier": "^3.9.6",
 		"ssh2": "^1.11.0",
 		"typescript": "^7.0.2",
